@@ -1,0 +1,33 @@
+{
+    "id": "com.mattermost.doc2vllm-ocr",
+    "name": "Doc2VLLM OCR",
+    "version": "0.1.0",
+    "description": "Mattermost의 이미지 첨부와 메시지를 받아 Doc2VLLM OCR 모델로 텍스트를 추출하는 전용 봇 플러그인입니다.",
+    "homepage_url": "https://docs.vllm.ai/",
+    "support_url": "https://docs.vllm.ai/",
+    "icon_path": "assets/starter-template-icon.svg",
+    "min_server_version": "10.0.0",
+    "server": {
+        "executables": {
+            "linux-amd64": "server/dist/plugin-linux-amd64",
+            "linux-arm64": "server/dist/plugin-linux-arm64",
+            "darwin-amd64": "server/dist/plugin-darwin-amd64",
+            "darwin-arm64": "server/dist/plugin-darwin-arm64",
+            "windows-amd64": "server/dist/plugin-windows-amd64.exe"
+        }
+    },
+    "webapp": {
+        "bundle_path": "webapp/dist/main.js"
+    },
+    "settings_schema": {
+        "header": "",
+        "footer": "",
+        "settings": [
+            {
+                "key": "Config",
+                "type": "custom"
+            }
+        ]
+    }
+}
+

@@ -1,0 +1,18 @@
+bin/
+build/bin/
+dist/
+package-temp/
+server/dist/
+webapp/dist/
+webapp/src/manifest.ts
+server/manifest.go
+server.exe
+
+# Mac
+.DS_Store
+
+# Jetbrains
+.idea/
+
+# VS Code
+.vscode
