@@ -119,6 +119,9 @@ func (p *Plugin) executeBotAndPost(ctx context.Context, request BotRunRequest) (
 	if err != nil {
 		return nil, err
 	}
+	if len(attachments) == 0 && strings.TrimSpace(request.RootID) != "" {
+		return p.executeThreadConversation(ctx, cfg, request, *bot, account, channel, startedAt, correlationID)
+	}
 	preparedInputs, processingFailures := p.prepareOCRInputs(ctx, cfg, attachments)
 	if len(preparedInputs) == 0 && len(processingFailures) == 0 {
 		return nil, fmt.Errorf("attach at least one image, PDF, DOCX, XLSX, or PPTX file before asking @%s", bot.Username)
@@ -221,6 +224,22 @@ func (p *Plugin) executeBotAndPost(ctx context.Context, request BotRunRequest) (
 		return nil, err
 	}
 
+	if request.RootID != "" {
+		state := threadConversationState{
+			BotID:           bot.ID,
+			ChannelID:       request.ChannelID,
+			RootID:          request.RootID,
+			DocumentContext: buildConversationDocumentContext(prompt, results, processingFailures, cfg.MaxOutputLength*2),
+			Turns: []conversationTurn{
+				{Role: "user", Content: prompt},
+				{Role: "assistant", Content: output},
+			},
+		}
+		if saveErr := p.saveThreadConversationState(state); saveErr != nil {
+			p.API.LogWarn("Failed to persist Doc2VLLM thread context", "error", saveErr, "root_id", request.RootID, "correlation_id", correlationID)
+		}
+	}
+
 	record := newExecutionRecord(request, account.Definition, correlationID, "completed", prompt, "", "", false, startedAt, time.Now())
 	status := "completed"
 	if len(processingFailures) > 0 {
@@ -239,6 +258,104 @@ func (p *Plugin) executeBotAndPost(ctx context.Context, request BotRunRequest) (
 		APIDurationMS: apiDurationTotal.Milliseconds(),
 		PostID:        post.Id,
 		Status:        status,
+		Output:        output,
+	}, nil
+}
+
+func (p *Plugin) executeThreadConversation(
+	ctx context.Context,
+	cfg *runtimeConfiguration,
+	request BotRunRequest,
+	bot BotDefinition,
+	account botAccount,
+	channel *model.Channel,
+	startedAt time.Time,
+	correlationID string,
+) (*BotRunResult, error) {
+	state, err := p.getThreadConversationState(request.RootID)
+	if err != nil {
+		return nil, err
+	}
+	if state == nil || strings.TrimSpace(state.DocumentContext) == "" {
+		return nil, fmt.Errorf("attach at least one image, PDF, DOCX, XLSX, or PPTX file before asking @%s", bot.Username)
+	}
+	if state.BotID != "" && !strings.EqualFold(state.BotID, bot.ID) {
+		return nil, fmt.Errorf("thread conversation is already bound to a different bot")
+	}
+
+	serviceConfig, err := cfg.serviceConfigForBot(bot)
+	if err != nil {
+		return nil, err
+	}
+
+	response, requestDebug, apiDuration, _, invokeErr := p.invokeDoc2VLLMConversation(
+		ctx,
+		serviceConfig,
+		bot,
+		state.DocumentContext,
+		state.Turns,
+		request.Prompt,
+		correlationID,
+	)
+	if invokeErr != nil {
+		failure := describeExecutionFailure(invokeErr, true, apiDuration)
+		record := newExecutionRecord(request, account.Definition, correlationID, "failed", request.Prompt, failure.Message, failure.ErrorCode, failure.Retryable, startedAt, time.Now())
+		p.appendExecutionHistory(request.UserID, record)
+		if postErr := p.postFailure(channel, request.RootID, account, correlationID, failure); postErr != nil {
+			p.API.LogError("Failed to post Doc2VLLM conversation error", "error", postErr, "correlation_id", correlationID)
+		}
+		return &BotRunResult{
+			CorrelationID: correlationID,
+			BotID:         account.Definition.ID,
+			BotUsername:   account.Definition.Username,
+			BotName:       account.Definition.DisplayName,
+			Model:         account.Definition.Model,
+			APIDurationMS: apiDuration.Milliseconds(),
+			Status:        "failed",
+			ErrorMessage:  failure.Message,
+			ErrorCode:     failure.ErrorCode,
+			ErrorDetail:   failure.Detail,
+			ErrorHint:     failure.Hint,
+			RequestURL:    failure.RequestURL,
+			HTTPStatus:    failure.HTTPStatus,
+			Retryable:     failure.Retryable,
+		}, invokeErr
+	}
+
+	output := truncateString(strings.TrimSpace(extractDoc2VLLMResponseText(response)), cfg.MaxOutputLength)
+	if bot.shouldMaskSensitiveData(cfg.MaskSensitiveData) {
+		output = truncateString(maskSensitiveContent(output), cfg.MaxOutputLength)
+	}
+	post, err := p.postSuccess(channel, request.RootID, account, correlationID, output, successDebugView{
+		Request: buildSuccessRequestDebugPayload([]doc2vllmRequestDebug{requestDebug}, ""),
+	}, apiDuration)
+	if err != nil {
+		record := newExecutionRecord(request, account.Definition, correlationID, "failed", request.Prompt, err.Error(), "", true, startedAt, time.Now())
+		p.appendExecutionHistory(request.UserID, record)
+		return nil, err
+	}
+
+	state.Turns = append(state.Turns,
+		conversationTurn{Role: "user", Content: request.Prompt},
+		conversationTurn{Role: "assistant", Content: output},
+	)
+	if saveErr := p.saveThreadConversationState(*state); saveErr != nil {
+		p.API.LogWarn("Failed to update Doc2VLLM thread conversation", "error", saveErr, "root_id", request.RootID, "correlation_id", correlationID)
+	}
+
+	record := newExecutionRecord(request, account.Definition, correlationID, "completed", request.Prompt, "", "", false, startedAt, time.Now())
+	p.appendExecutionHistory(request.UserID, record)
+	p.logUsage(cfg, correlationID, request, account.Definition, "completed", "")
+
+	return &BotRunResult{
+		CorrelationID: correlationID,
+		BotID:         account.Definition.ID,
+		BotUsername:   account.Definition.Username,
+		BotName:       account.Definition.DisplayName,
+		Model:         account.Definition.Model,
+		APIDurationMS: apiDuration.Milliseconds(),
+		PostID:        post.Id,
+		Status:        "completed",
 		Output:        output,
 	}, nil
 }

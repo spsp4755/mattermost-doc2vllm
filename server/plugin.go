@@ -113,6 +113,19 @@ func (p *Plugin) handlePostedMessage(post *model.Post) error {
 	}
 
 	bot, prompt, triggered := p.extractPromptFromMessage(cfg, channel, post.Message)
+	if !triggered && post.RootId != "" {
+		if state, stateErr := p.getThreadConversationState(post.RootId); stateErr == nil && state != nil {
+			bot = cfg.getBotByID(state.BotID)
+			triggered = bot != nil
+		}
+	}
+	if !triggered && len(post.FileIds) > 0 {
+		allowedBots := cfg.getAllowedBots(postingUser, channel, team)
+		if len(allowedBots) == 1 {
+			bot = &allowedBots[0]
+			triggered = true
+		}
+	}
 	if !triggered {
 		return nil
 	}
@@ -132,7 +145,7 @@ func (p *Plugin) handlePostedMessage(post *model.Post) error {
 		return p.postInstruction(channel, responseRootID(post), account, fmt.Sprintf("`@%s` is not available in this conversation.", bot.Username))
 	}
 
-	if len(post.FileIds) == 0 {
+	if len(post.FileIds) == 0 && post.RootId == "" {
 		return p.postInstruction(channel, responseRootID(post), account, buildBotPromptMessage(*bot))
 	}
 

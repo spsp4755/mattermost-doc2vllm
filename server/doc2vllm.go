@@ -245,13 +245,13 @@ func (p *Plugin) invokeDoc2VLLMOCR(
 	userPrompt string,
 	correlationID string,
 ) (doc2vllmDocumentResult, int, time.Duration, error) {
-	requestPayload, requestDebug, requestPrompt, err := buildDoc2VLLMChatRequest(service, bot, attachment, userPrompt, correlationID)
+	requestPayload, requestDebug, requestPrompt, err := buildDoc2VLLMChatRequest(service, bot, &attachment, userPrompt, "", nil, correlationID)
 	if err != nil {
 		return doc2vllmDocumentResult{}, 0, 0, err
 	}
 
 	startedAt := time.Now()
-	result, statusCode, err := p.performDoc2VLLMOCRRequest(ctx, service, bot, attachment, requestPayload, requestDebug)
+	result, statusCode, err := p.performDoc2VLLMRequest(ctx, service, bot, attachment, requestPayload, requestDebug)
 	elapsed := time.Since(startedAt)
 	if err != nil {
 		return result, statusCode, elapsed, err
@@ -265,39 +265,129 @@ func (p *Plugin) invokeDoc2VLLMOCR(
 func buildDoc2VLLMChatRequest(
 	service doc2vllmServiceConfig,
 	bot BotDefinition,
-	attachment botAttachment,
+	attachment *botAttachment,
 	userPrompt string,
+	documentContext string,
+	turns []conversationTurn,
 	correlationID string,
 ) (doc2vllmChatRequest, doc2vllmRequestDebug, string, error) {
-	dataURL, err := buildDoc2VLLMImageDataURL(attachment)
-	if err != nil {
-		return doc2vllmChatRequest{}, doc2vllmRequestDebug{}, "", err
+	requestPrompt := strings.TrimSpace(userPrompt)
+	if requestPrompt == "" {
+		requestPrompt = bot.effectiveOCRInstruction()
 	}
 
-	requestPrompt := bot.effectiveDoc2VLLMPrompt(userPrompt)
+	messages := make([]doc2vllmMessage, 0, len(turns)+2)
+	systemPrompt := buildDoc2VLLMSystemPrompt(bot, documentContext, attachment != nil)
+	if systemPrompt != "" {
+		messages = append(messages, doc2vllmMessage{
+			Role: "system",
+			Content: []doc2vllmContentPart{{
+				Type: "text",
+				Text: systemPrompt,
+			}},
+		})
+	}
+
+	for _, turn := range normalizeConversationTurns(turns) {
+		messages = append(messages, doc2vllmMessage{
+			Role: turn.Role,
+			Content: []doc2vllmContentPart{{
+				Type: "text",
+				Text: turn.Content,
+			}},
+		})
+	}
+
+	userContent := []doc2vllmContentPart{{
+		Type: "text",
+		Text: buildDoc2VLLMUserPrompt(bot, requestPrompt, documentContext, attachment != nil),
+	}}
+	debugAttachment := botAttachment{}
+	if attachment != nil {
+		dataURL, err := buildDoc2VLLMImageDataURL(*attachment)
+		if err != nil {
+			return doc2vllmChatRequest{}, doc2vllmRequestDebug{}, "", err
+		}
+		userContent = append(userContent, doc2vllmContentPart{
+			Type: "image_url",
+			ImageURL: &doc2vllmImageURLPart{
+				URL: dataURL,
+			},
+		})
+		debugAttachment = *attachment
+	}
+
 	requestPayload := doc2vllmChatRequest{
 		Model: defaultIfEmpty(strings.TrimSpace(bot.Model), defaultDoc2VLLMModel),
-		Messages: []doc2vllmMessage{{
-			Role: "user",
-			Content: []doc2vllmContentPart{
-				{
-					Type: "text",
-					Text: requestPrompt,
-				},
-				{
-					Type: "image_url",
-					ImageURL: &doc2vllmImageURLPart{
-						URL: dataURL,
-					},
-				},
-			},
-		}},
+		Messages: append(messages, doc2vllmMessage{
+			Role:    "user",
+			Content: userContent,
+		}),
 		Temperature: bot.effectiveDoc2VLLMTemperature(),
 		MaxTokens:   bot.effectiveDoc2VLLMMaxTokens(),
 		TopP:        bot.effectiveDoc2VLLMTopP(),
 	}
 
-	return requestPayload, buildDoc2VLLMRequestDebug(service, requestPayload, attachment, requestPrompt, correlationID), requestPrompt, nil
+	return requestPayload, buildDoc2VLLMRequestDebug(service, requestPayload, debugAttachment, requestPrompt, correlationID), requestPrompt, nil
+}
+
+func buildDoc2VLLMSystemPrompt(bot BotDefinition, documentContext string, hasAttachment bool) string {
+	parts := []string{
+		"You are an OCR document assistant.",
+	}
+	if instruction := strings.TrimSpace(bot.effectiveOCRInstruction()); instruction != "" {
+		parts = append(parts, instruction)
+	}
+	if hasAttachment {
+		parts = append(parts, "Read the attached document carefully and answer in the same language as the user when possible.")
+	} else if strings.TrimSpace(documentContext) != "" {
+		parts = append(parts, "Use the previously extracted document context as the source of truth for follow-up answers. If the answer is not grounded in the document context, say so clearly.")
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n\n"))
+}
+
+func buildDoc2VLLMUserPrompt(bot BotDefinition, userPrompt, documentContext string, hasAttachment bool) string {
+	userPrompt = strings.TrimSpace(userPrompt)
+	if hasAttachment {
+		if userPrompt == "" {
+			return "Process the attached document."
+		}
+		return userPrompt
+	}
+
+	parts := make([]string, 0, 3)
+	if strings.TrimSpace(documentContext) != "" {
+		parts = append(parts, "[Document context]\n"+strings.TrimSpace(documentContext))
+	}
+	if userPrompt != "" {
+		parts = append(parts, "[User question]\n"+userPrompt)
+	} else if bot.supportsDocumentConversation() {
+		parts = append(parts, "[User question]\nPlease continue the document conversation.")
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n\n"))
+}
+
+func (p *Plugin) invokeDoc2VLLMConversation(
+	ctx context.Context,
+	service doc2vllmServiceConfig,
+	bot BotDefinition,
+	documentContext string,
+	turns []conversationTurn,
+	userPrompt string,
+	correlationID string,
+) (doc2vllmOCRResponse, doc2vllmRequestDebug, time.Duration, int, error) {
+	requestPayload, requestDebug, _, err := buildDoc2VLLMChatRequest(service, bot, nil, userPrompt, documentContext, turns, correlationID)
+	if err != nil {
+		return doc2vllmOCRResponse{}, doc2vllmRequestDebug{}, 0, 0, err
+	}
+
+	startedAt := time.Now()
+	result, statusCode, err := p.performDoc2VLLMRequest(ctx, service, bot, botAttachment{}, requestPayload, requestDebug)
+	elapsed := time.Since(startedAt)
+	if err != nil {
+		return doc2vllmOCRResponse{}, doc2vllmRequestDebug{}, elapsed, statusCode, err
+	}
+	return result.Response, requestDebug, elapsed, statusCode, nil
 }
 
 func newDirectTextDocumentResult(attachment botAttachment, text, model, source, processor string) doc2vllmDocumentResult {
@@ -352,7 +442,7 @@ func buildDoc2VLLMImageDataURL(attachment botAttachment) (string, error) {
 	return fmt.Sprintf("data:%s;base64,%s", mimeType, encoded), nil
 }
 
-func (p *Plugin) performDoc2VLLMOCRRequest(
+func (p *Plugin) performDoc2VLLMRequest(
 	ctx context.Context,
 	service doc2vllmServiceConfig,
 	bot BotDefinition,

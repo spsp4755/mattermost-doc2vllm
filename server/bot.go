@@ -123,6 +123,21 @@ func (b BotDefinition) effectiveDoc2VLLMPrompt(userPrompt string) string {
 	return defaultDoc2VLLMOCRPrompt
 }
 
+func (b BotDefinition) effectiveOCRInstruction() string {
+	if value := strings.TrimSpace(b.OCRPrompt); value != "" {
+		return value
+	}
+	return defaultDoc2VLLMOCRPrompt
+}
+
+func (b BotDefinition) supportsDocumentConversation() bool {
+	model := strings.ToLower(strings.TrimSpace(b.Model))
+	return strings.Contains(model, "glm-ocr") ||
+		strings.Contains(model, "paddleocr-vl") ||
+		strings.Contains(model, "hunyuanocr") ||
+		strings.Contains(model, "ocr")
+}
+
 func (b BotDefinition) effectiveDoc2VLLMTemperature() float64 {
 	return normalizeDoc2VLLMTemperature(b.Temperature)
 }

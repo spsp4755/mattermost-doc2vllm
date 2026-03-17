@@ -7,6 +7,11 @@ webapp/dist/
 webapp/src/manifest.ts
 server/manifest.go
 server.exe
+.codex-cache/
+.hf-cache/
+artifacts/ocr-smoke/
+__pycache__/
+*.pyc
 
 # Mac
 .DS_Store

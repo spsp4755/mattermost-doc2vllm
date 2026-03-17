@@ -187,8 +187,10 @@ func TestBuildDoc2VLLMChatRequest(t *testing.T) {
 	requestPayload, requestDebug, requestPrompt, err := buildDoc2VLLMChatRequest(
 		doc2vllmServiceConfig{BaseURL: "http://localhost:8000/v1/chat/completions", AuthMode: "bearer"},
 		bot,
-		botAttachment{Name: "sample.png", MIMEType: "image/png", Content: []byte("png")},
+		&botAttachment{Name: "sample.png", MIMEType: "image/png", Content: []byte("png")},
 		"",
+		"",
+		nil,
 		"corr-123",
 	)
 	require.NoError(t, err)
@@ -197,12 +199,39 @@ func TestBuildDoc2VLLMChatRequest(t *testing.T) {
 	require.Equal(t, 0.3, requestPayload.Temperature)
 	require.Equal(t, 2048, requestPayload.MaxTokens)
 	require.Equal(t, 0.9, requestPayload.TopP)
-	require.Len(t, requestPayload.Messages, 1)
-	require.Len(t, requestPayload.Messages[0].Content, 2)
-	require.Equal(t, "text", requestPayload.Messages[0].Content[0].Type)
-	require.Equal(t, "image_url", requestPayload.Messages[0].Content[1].Type)
-	require.True(t, strings.HasPrefix(requestPayload.Messages[0].Content[1].ImageURL.URL, "data:image/png;base64,"))
+	require.Len(t, requestPayload.Messages, 2)
+	require.Equal(t, "system", requestPayload.Messages[0].Role)
+	require.Len(t, requestPayload.Messages[1].Content, 2)
+	require.Equal(t, "text", requestPayload.Messages[1].Content[0].Type)
+	require.Equal(t, "image_url", requestPayload.Messages[1].Content[1].Type)
+	require.True(t, strings.HasPrefix(requestPayload.Messages[1].Content[1].ImageURL.URL, "data:image/png;base64,"))
 	require.Equal(t, "sample.png", requestDebug.Attachment.Name)
+}
+
+func TestBuildDoc2VLLMChatRequestIncludesDocumentContextForConversation(t *testing.T) {
+	bot, err := (BotDefinition{
+		Username:  "glm-bot",
+		Model:     "GLM-OCR",
+		OCRPrompt: "Extract the document faithfully and answer follow-up questions from the extracted text.",
+	}).normalize()
+	require.NoError(t, err)
+
+	requestPayload, _, _, err := buildDoc2VLLMChatRequest(
+		doc2vllmServiceConfig{BaseURL: "http://localhost:8000/v1/chat/completions", AuthMode: "bearer"},
+		bot,
+		nil,
+		"What is the invoice number?",
+		"[Document] invoice.png\nInvoice No: 2026-001",
+		[]conversationTurn{{Role: "assistant", Content: "Previous OCR output"}},
+		"corr-456",
+	)
+	require.NoError(t, err)
+	require.Len(t, requestPayload.Messages, 3)
+	require.Equal(t, "system", requestPayload.Messages[0].Role)
+	require.Contains(t, requestPayload.Messages[0].Content[0].Text, "OCR document assistant")
+	require.Equal(t, "assistant", requestPayload.Messages[1].Role)
+	require.Contains(t, requestPayload.Messages[2].Content[0].Text, "Invoice No: 2026-001")
+	require.Contains(t, requestPayload.Messages[2].Content[0].Text, "What is the invoice number?")
 }
 
 func TestBuildDoc2VLLMImageDataURLRejectsNonImages(t *testing.T) {
@@ -617,6 +646,41 @@ func TestExtractPromptFromMessageIgnoresEmptyNonDirectMessages(t *testing.T) {
 	require.False(t, triggered)
 	require.Nil(t, triggeredBot)
 	require.Empty(t, prompt)
+}
+
+func TestNormalizeConversationTurnsKeepsRecentNonEmptyItems(t *testing.T) {
+	turns := normalizeConversationTurns([]conversationTurn{
+		{Role: "user", Content: "first"},
+		{Role: "", Content: "ignored"},
+		{Role: "assistant", Content: "second"},
+	})
+
+	require.Len(t, turns, 2)
+	require.Equal(t, "user", turns[0].Role)
+	require.Equal(t, "assistant", turns[1].Role)
+}
+
+func TestBuildConversationDocumentContextIncludesResultsAndFailures(t *testing.T) {
+	contextText := buildConversationDocumentContext("Summarize this", []doc2vllmDocumentResult{{
+		Attachment:    botAttachment{Name: "invoice.png"},
+		RequestPrompt: "Extract the text",
+		Response: doc2vllmOCRResponse{
+			Model: "GLM-OCR",
+			Choices: []doc2vllmChoice{{
+				Message: doc2vllmChoiceMessage{Role: "assistant", Content: "Invoice No: 2026-001"},
+			}},
+		},
+		Source:    "ocr",
+		Processor: "glm-ocr",
+	}}, []documentProcessingFailure{{
+		AttachmentName: "appendix.pdf",
+		Message:        "conversion failed",
+	}}, 4000)
+
+	require.Contains(t, contextText, "[Initial user request]")
+	require.Contains(t, contextText, "[Document] invoice.png")
+	require.Contains(t, contextText, "Invoice No: 2026-001")
+	require.Contains(t, contextText, "appendix.pdf")
 }
 
 func buildTestDOCX(t *testing.T, files map[string]string) []byte {
