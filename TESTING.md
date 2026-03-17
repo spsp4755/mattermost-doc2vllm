@@ -72,6 +72,13 @@ $env:HF_HOME='C:\Users\USER\Documents\Playground\repo\.hf-cache'
 & 'C:\Users\USER\Documents\Playground\tools\python313-hunyuan\Scripts\python.exe' .\scripts\ocr_model_smoke_test.py --model hunyuanocr
 ```
 
+Korean smoke test example:
+
+```powershell
+$env:HF_HOME='C:\Users\USER\Documents\Playground\repo\.hf-cache'
+& 'C:\Users\USER\Documents\Playground\tools\python313\python.exe' .\scripts\ocr_model_smoke_test.py --model glm-ocr --locale ko
+```
+
 Offline rerun from cache:
 
 ```powershell

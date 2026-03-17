@@ -14,7 +14,6 @@ from transformers import (
 
 ROOT = Path(__file__).resolve().parents[1]
 ARTIFACTS_DIR = ROOT / "artifacts" / "ocr-smoke"
-SAMPLE_IMAGE_PATH = ARTIFACTS_DIR / "sample.png"
 
 MODEL_CONFIG = {
     "glm-ocr": {
@@ -35,35 +34,55 @@ MODEL_CONFIG = {
 }
 
 
-def ensure_sample_image() -> Path:
+def load_font(size: int):
+    candidates = [
+        "C:/Windows/Fonts/malgun.ttf",
+        "C:/Windows/Fonts/malgunbd.ttf",
+        "C:/Windows/Fonts/arial.ttf",
+    ]
+    for candidate in candidates:
+        try:
+            return ImageFont.truetype(candidate, size)
+        except OSError:
+            continue
+    return ImageFont.load_default()
+
+
+def ensure_sample_image(locale: str) -> Path:
     ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
-    if SAMPLE_IMAGE_PATH.exists():
-        return SAMPLE_IMAGE_PATH
+    sample_image_path = ARTIFACTS_DIR / f"sample-{locale}.png"
+    if sample_image_path.exists():
+        return sample_image_path
 
     image = Image.new("RGB", (1600, 900), "white")
     draw = ImageDraw.Draw(image)
-    try:
-        font = ImageFont.truetype("arial.ttf", 52)
-        title_font = ImageFont.truetype("arial.ttf", 68)
-    except OSError:
-        font = ImageFont.load_default()
-        title_font = font
+    font = load_font(52)
+    title_font = load_font(68)
 
-    lines = [
-        ("Mattermost OCR Smoke Test", title_font),
-        ("Invoice No: INV-2026-0317", font),
-        ("Customer: OpenAI Korea", font),
-        ("Total Amount: $12,345.67", font),
-        ("Question target: What is the invoice number?", font),
-    ]
+    if locale == "ko":
+        lines = [
+            ("매터모스트 OCR 스모크 테스트", title_font),
+            ("문서 번호: 문서-2026-0317", font),
+            ("고객명: 오픈AI 코리아", font),
+            ("합계 금액: 12,345원", font),
+            ("질문 대상: 문서 번호가 무엇인가요?", font),
+        ]
+    else:
+        lines = [
+            ("Mattermost OCR Smoke Test", title_font),
+            ("Invoice No: INV-2026-0317", font),
+            ("Customer: OpenAI Korea", font),
+            ("Total Amount: $12,345.67", font),
+            ("Question target: What is the invoice number?", font),
+        ]
 
     y = 120
     for text, current_font in lines:
         draw.text((100, y), text, fill="black", font=current_font)
         y += 120
 
-    image.save(SAMPLE_IMAGE_PATH)
-    return SAMPLE_IMAGE_PATH
+    image.save(sample_image_path)
+    return sample_image_path
 
 
 def resolve_device():
@@ -183,9 +202,10 @@ def main():
     parser.add_argument("--model", choices=sorted(MODEL_CONFIG.keys()), required=True)
     parser.add_argument("--output", default=str(ARTIFACTS_DIR / "result.json"))
     parser.add_argument("--local-files-only", action="store_true")
+    parser.add_argument("--locale", choices=["en", "ko"], default="en")
     args = parser.parse_args()
 
-    image_path = ensure_sample_image()
+    image_path = ensure_sample_image(args.locale)
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
