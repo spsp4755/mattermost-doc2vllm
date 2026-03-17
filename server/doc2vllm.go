@@ -48,8 +48,8 @@ type doc2vllmChatRequest struct {
 }
 
 type doc2vllmMessage struct {
-	Role    string                `json:"role"`
-	Content []doc2vllmContentPart `json:"content"`
+	Role    string `json:"role"`
+	Content any    `json:"content"`
 }
 
 type doc2vllmContentPart struct {
@@ -110,15 +110,19 @@ type doc2vllmCallError struct {
 }
 
 type doc2vllmRequestDebug struct {
-	URL         string                  `json:"url"`
-	AuthMode    string                  `json:"auth_mode"`
-	Model       string                  `json:"model"`
-	Prompt      string                  `json:"prompt"`
-	Temperature float64                 `json:"temperature"`
-	MaxTokens   int                     `json:"max_tokens"`
-	TopP        float64                 `json:"top_p"`
-	Attachment  doc2vllmAttachmentDebug `json:"attachment"`
-	Correlation string                  `json:"correlation_id,omitempty"`
+	URL                 string                  `json:"url"`
+	AuthMode            string                  `json:"auth_mode"`
+	Model               string                  `json:"model"`
+	Prompt              string                  `json:"prompt"`
+	SystemPrompt        string                  `json:"system_prompt,omitempty"`
+	UserPrompt          string                  `json:"user_prompt,omitempty"`
+	EffectiveUserPrompt string                  `json:"effective_user_prompt,omitempty"`
+	Temperature         float64                 `json:"temperature"`
+	MaxTokens           int                     `json:"max_tokens"`
+	TopP                float64                 `json:"top_p"`
+	Messages            []doc2vllmMessageDebug  `json:"messages,omitempty"`
+	Attachment          doc2vllmAttachmentDebug `json:"attachment"`
+	Correlation         string                  `json:"correlation_id,omitempty"`
 }
 
 type doc2vllmAttachmentDebug struct {
@@ -126,6 +130,12 @@ type doc2vllmAttachmentDebug struct {
 	MIMEType  string `json:"mime_type"`
 	Extension string `json:"extension,omitempty"`
 	Size      int64  `json:"size"`
+}
+
+type doc2vllmMessageDebug struct {
+	Role           string `json:"role"`
+	ContentType    string `json:"content_type"`
+	ContentPreview string `json:"content_preview,omitempty"`
 }
 
 type doc2vllmResponseDebug struct {
@@ -271,38 +281,30 @@ func buildDoc2VLLMChatRequest(
 	turns []conversationTurn,
 	correlationID string,
 ) (doc2vllmChatRequest, doc2vllmRequestDebug, string, error) {
-	requestPrompt := strings.TrimSpace(userPrompt)
-	if requestPrompt == "" {
-		requestPrompt = bot.effectiveOCRInstruction()
+	rawUserPrompt := strings.TrimSpace(userPrompt)
+	effectiveUserPrompt := rawUserPrompt
+	if effectiveUserPrompt == "" {
+		effectiveUserPrompt = bot.effectiveOCRInstruction()
 	}
 
-	messages := make([]doc2vllmMessage, 0, len(turns)+2)
+	messages := make([]doc2vllmMessage, 0, 2)
 	systemPrompt := buildDoc2VLLMSystemPrompt(bot, documentContext, attachment != nil)
 	if systemPrompt != "" {
 		messages = append(messages, doc2vllmMessage{
-			Role: "system",
-			Content: []doc2vllmContentPart{{
-				Type: "text",
-				Text: systemPrompt,
-			}},
-		})
-	}
-
-	for _, turn := range normalizeConversationTurns(turns) {
-		messages = append(messages, doc2vllmMessage{
-			Role: turn.Role,
-			Content: []doc2vllmContentPart{{
-				Type: "text",
-				Text: turn.Content,
-			}},
+			Role:    "system",
+			Content: systemPrompt,
 		})
 	}
 
 	userContent := []doc2vllmContentPart{{
 		Type: "text",
-		Text: buildDoc2VLLMUserPrompt(bot, requestPrompt, documentContext, attachment != nil),
+		Text: buildDoc2VLLMUserPrompt(rawUserPrompt, effectiveUserPrompt, documentContext, turns, attachment != nil),
 	}}
 	debugAttachment := botAttachment{}
+	userMessage := doc2vllmMessage{
+		Role:    "user",
+		Content: userContent[0].Text,
+	}
 	if attachment != nil {
 		dataURL, err := buildDoc2VLLMImageDataURL(*attachment)
 		if err != nil {
@@ -315,20 +317,18 @@ func buildDoc2VLLMChatRequest(
 			},
 		})
 		debugAttachment = *attachment
+		userMessage.Content = userContent
 	}
 
 	requestPayload := doc2vllmChatRequest{
-		Model: defaultIfEmpty(strings.TrimSpace(bot.Model), defaultDoc2VLLMModel),
-		Messages: append(messages, doc2vllmMessage{
-			Role:    "user",
-			Content: userContent,
-		}),
+		Model:       defaultIfEmpty(strings.TrimSpace(bot.Model), defaultDoc2VLLMModel),
+		Messages:    append(messages, userMessage),
 		Temperature: bot.effectiveDoc2VLLMTemperature(),
 		MaxTokens:   bot.effectiveDoc2VLLMMaxTokens(),
 		TopP:        bot.effectiveDoc2VLLMTopP(),
 	}
 
-	return requestPayload, buildDoc2VLLMRequestDebug(service, requestPayload, debugAttachment, requestPrompt, correlationID), requestPrompt, nil
+	return requestPayload, buildDoc2VLLMRequestDebug(service, requestPayload, debugAttachment, systemPrompt, rawUserPrompt, effectiveUserPrompt, correlationID), effectiveUserPrompt, nil
 }
 
 func buildDoc2VLLMSystemPrompt(bot BotDefinition, documentContext string, hasAttachment bool) string {
@@ -346,25 +346,49 @@ func buildDoc2VLLMSystemPrompt(bot BotDefinition, documentContext string, hasAtt
 	return strings.TrimSpace(strings.Join(parts, "\n\n"))
 }
 
-func buildDoc2VLLMUserPrompt(bot BotDefinition, userPrompt, documentContext string, hasAttachment bool) string {
+func buildDoc2VLLMUserPrompt(userPrompt, effectiveUserPrompt, documentContext string, turns []conversationTurn, hasAttachment bool) string {
 	userPrompt = strings.TrimSpace(userPrompt)
+	effectiveUserPrompt = strings.TrimSpace(effectiveUserPrompt)
 	if hasAttachment {
-		if userPrompt == "" {
+		if effectiveUserPrompt == "" {
 			return "Process the attached document."
 		}
-		return userPrompt
+		return effectiveUserPrompt
 	}
 
-	parts := make([]string, 0, 3)
+	parts := make([]string, 0, 4)
 	if strings.TrimSpace(documentContext) != "" {
 		parts = append(parts, "[Document context]\n"+strings.TrimSpace(documentContext))
 	}
-	if userPrompt != "" {
-		parts = append(parts, "[User question]\n"+userPrompt)
-	} else if bot.supportsDocumentConversation() {
-		parts = append(parts, "[User question]\nPlease continue the document conversation.")
+	if history := buildDoc2VLLMConversationHistory(turns); history != "" {
+		parts = append(parts, "[Conversation history]\n"+history)
 	}
+	currentRequest := userPrompt
+	if currentRequest == "" {
+		currentRequest = effectiveUserPrompt
+	}
+	parts = append(parts, "[Current user request]\n"+defaultIfEmpty(strings.TrimSpace(currentRequest), "Please answer using the extracted document context."))
 	return strings.TrimSpace(strings.Join(parts, "\n\n"))
+}
+
+func buildDoc2VLLMConversationHistory(turns []conversationTurn) string {
+	normalized := normalizeConversationTurns(turns)
+	if len(normalized) == 0 {
+		return ""
+	}
+
+	lines := make([]string, 0, len(normalized))
+	for _, turn := range normalized {
+		roleLabel := "User"
+		switch turn.Role {
+		case "assistant":
+			roleLabel = "Assistant"
+		case "system":
+			roleLabel = "System"
+		}
+		lines = append(lines, fmt.Sprintf("%s: %s", roleLabel, turn.Content))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (p *Plugin) invokeDoc2VLLMConversation(
@@ -559,11 +583,8 @@ func (p *Plugin) testDoc2VLLMConnection(ctx context.Context, cfg *runtimeConfigu
 	requestPayload := doc2vllmChatRequest{
 		Model: defaultDoc2VLLMModel,
 		Messages: []doc2vllmMessage{{
-			Role: "user",
-			Content: []doc2vllmContentPart{{
-				Type: "text",
-				Text: defaultDoc2VLLMOCRPrompt,
-			}},
+			Role:    "user",
+			Content: defaultDoc2VLLMOCRPrompt,
 		}},
 		Temperature: 0,
 		MaxTokens:   16,
@@ -739,17 +760,23 @@ func buildDoc2VLLMRequestDebug(
 	service doc2vllmServiceConfig,
 	requestPayload doc2vllmChatRequest,
 	attachment botAttachment,
-	requestPrompt string,
+	systemPrompt string,
+	userPrompt string,
+	effectiveUserPrompt string,
 	correlationID string,
 ) doc2vllmRequestDebug {
 	return doc2vllmRequestDebug{
-		URL:         strings.TrimSpace(service.BaseURL),
-		AuthMode:    strings.TrimSpace(service.AuthMode),
-		Model:       strings.TrimSpace(requestPayload.Model),
-		Prompt:      truncateString(strings.TrimSpace(requestPrompt), 2000),
-		Temperature: requestPayload.Temperature,
-		MaxTokens:   requestPayload.MaxTokens,
-		TopP:        requestPayload.TopP,
+		URL:                 strings.TrimSpace(service.BaseURL),
+		AuthMode:            strings.TrimSpace(service.AuthMode),
+		Model:               strings.TrimSpace(requestPayload.Model),
+		Prompt:              truncateString(strings.TrimSpace(effectiveUserPrompt), 2000),
+		SystemPrompt:        truncateString(strings.TrimSpace(systemPrompt), 2000),
+		UserPrompt:          truncateString(strings.TrimSpace(userPrompt), 2000),
+		EffectiveUserPrompt: truncateString(strings.TrimSpace(effectiveUserPrompt), 2000),
+		Temperature:         requestPayload.Temperature,
+		MaxTokens:           requestPayload.MaxTokens,
+		TopP:                requestPayload.TopP,
+		Messages:            buildDoc2VLLMMessageDebugs(requestPayload.Messages),
 		Attachment: doc2vllmAttachmentDebug{
 			Name:      sanitizeUploadFilename(attachment.Name),
 			MIMEType:  strings.TrimSpace(attachment.MIMEType),
@@ -758,6 +785,58 @@ func buildDoc2VLLMRequestDebug(
 		},
 		Correlation: strings.TrimSpace(correlationID),
 	}
+}
+
+func buildDoc2VLLMMessageDebugs(messages []doc2vllmMessage) []doc2vllmMessageDebug {
+	if len(messages) == 0 {
+		return nil
+	}
+
+	debugMessages := make([]doc2vllmMessageDebug, 0, len(messages))
+	for _, message := range messages {
+		contentType := "unknown"
+		contentPreview := ""
+
+		switch typed := message.Content.(type) {
+		case string:
+			contentType = "text"
+			contentPreview = typed
+		case []doc2vllmContentPart:
+			contentType = "multimodal"
+			textParts := make([]string, 0, len(typed))
+			imageCount := 0
+			for _, part := range typed {
+				if strings.TrimSpace(part.Text) != "" {
+					textParts = append(textParts, strings.TrimSpace(part.Text))
+				}
+				if part.Type == "image_url" && part.ImageURL != nil {
+					imageCount++
+				}
+			}
+			contentPreview = strings.Join(textParts, "\n")
+			if imageCount > 0 {
+				imageSummary := fmt.Sprintf("[images: %d]", imageCount)
+				if contentPreview == "" {
+					contentPreview = imageSummary
+				} else {
+					contentPreview += "\n" + imageSummary
+				}
+			}
+		default:
+			contentPreview = extractTextFromValue(typed)
+			if contentPreview != "" {
+				contentType = "structured"
+			}
+		}
+
+		debugMessages = append(debugMessages, doc2vllmMessageDebug{
+			Role:           message.Role,
+			ContentType:    contentType,
+			ContentPreview: truncateString(strings.TrimSpace(contentPreview), 600),
+		})
+	}
+
+	return debugMessages
 }
 
 func buildDoc2VLLMResponseDebug(statusCode int, headers http.Header, body []byte, callErr *doc2vllmCallError) doc2vllmResponseDebug {

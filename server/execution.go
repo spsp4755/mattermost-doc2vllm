@@ -153,9 +153,14 @@ func (p *Plugin) executeBotAndPost(ctx context.Context, request BotRunRequest) (
 		requestDebugs = append(requestDebugs, result.RequestDebugs...)
 	}
 
+	effectivePrompt := strings.TrimSpace(prompt)
+	if effectivePrompt == "" && len(results) > 0 {
+		effectivePrompt = strings.TrimSpace(results[0].RequestPrompt)
+	}
+
 	if len(results) == 0 {
 		failure := buildExecutionFailureFromDocumentFailures(processingFailures, apiDurationTotal)
-		record := newExecutionRecord(request, account.Definition, correlationID, "failed", prompt, failure.Message, failure.ErrorCode, failure.Retryable, startedAt, time.Now())
+		record := newExecutionRecord(request, account.Definition, correlationID, "failed", effectivePrompt, failure.Message, failure.ErrorCode, failure.Retryable, startedAt, time.Now())
 		p.appendExecutionHistory(request.UserID, record)
 		p.logUsage(cfg, correlationID, request, account.Definition, "failed", failure.Message)
 		if postErr := p.postFailure(channel, request.RootID, account, correlationID, failure); postErr != nil {
@@ -180,12 +185,12 @@ func (p *Plugin) executeBotAndPost(ctx context.Context, request BotRunRequest) (
 	}
 
 	shouldMaskSensitive := bot.shouldMaskSensitiveData(cfg.MaskSensitiveData)
-	documentContext := buildDocumentResponseMarkdown(prompt, results, processingFailures, cfg.MaxOutputLength)
+	documentContext := buildDocumentResponseMarkdown(effectivePrompt, results, processingFailures, cfg.MaxOutputLength)
 	if shouldMaskSensitive {
 		documentContext = truncateString(maskSensitiveContent(documentContext), cfg.MaxOutputLength)
 	}
 
-	output := buildDocumentResponseOutput(bot.effectiveOutputMode(), prompt, results, processingFailures, cfg.MaxOutputLength)
+	output := buildDocumentResponseOutput(bot.effectiveOutputMode(), effectivePrompt, results, processingFailures, cfg.MaxOutputLength)
 	if shouldMaskSensitive {
 		output = truncateString(maskSensitiveContent(output), cfg.MaxOutputLength)
 	}
@@ -219,7 +224,7 @@ func (p *Plugin) executeBotAndPost(ctx context.Context, request BotRunRequest) (
 	post, err := p.postSuccess(channel, request.RootID, account, correlationID, output, debugView, apiDurationTotal)
 	if err != nil {
 		failure := describeExecutionFailure(err, true, apiDurationTotal)
-		record := newExecutionRecord(request, account.Definition, correlationID, "failed", prompt, failure.Message, failure.ErrorCode, failure.Retryable, startedAt, time.Now())
+		record := newExecutionRecord(request, account.Definition, correlationID, "failed", effectivePrompt, failure.Message, failure.ErrorCode, failure.Retryable, startedAt, time.Now())
 		p.appendExecutionHistory(request.UserID, record)
 		return nil, err
 	}
@@ -229,9 +234,9 @@ func (p *Plugin) executeBotAndPost(ctx context.Context, request BotRunRequest) (
 			BotID:           bot.ID,
 			ChannelID:       request.ChannelID,
 			RootID:          request.RootID,
-			DocumentContext: buildConversationDocumentContext(prompt, results, processingFailures, cfg.MaxOutputLength*2),
+			DocumentContext: buildConversationDocumentContext(effectivePrompt, results, processingFailures, cfg.MaxOutputLength*2),
 			Turns: []conversationTurn{
-				{Role: "user", Content: prompt},
+				{Role: "user", Content: effectivePrompt},
 				{Role: "assistant", Content: output},
 			},
 		}
@@ -240,12 +245,12 @@ func (p *Plugin) executeBotAndPost(ctx context.Context, request BotRunRequest) (
 		}
 	}
 
-	record := newExecutionRecord(request, account.Definition, correlationID, "completed", prompt, "", "", false, startedAt, time.Now())
+	record := newExecutionRecord(request, account.Definition, correlationID, "completed", effectivePrompt, "", "", false, startedAt, time.Now())
 	status := "completed"
 	if len(processingFailures) > 0 {
 		status = "completed_partial"
 	}
-	record = newExecutionRecord(request, account.Definition, correlationID, status, prompt, summarizeDocumentFailureMessages(processingFailures, 2), "", false, startedAt, time.Now())
+	record = newExecutionRecord(request, account.Definition, correlationID, status, effectivePrompt, summarizeDocumentFailureMessages(processingFailures, 2), "", false, startedAt, time.Now())
 	p.appendExecutionHistory(request.UserID, record)
 	p.logUsage(cfg, correlationID, request, account.Definition, status, summarizeDocumentFailureMessages(processingFailures, 2))
 
@@ -297,9 +302,13 @@ func (p *Plugin) executeThreadConversation(
 		request.Prompt,
 		correlationID,
 	)
+	effectivePrompt := strings.TrimSpace(request.Prompt)
+	if effectivePrompt == "" {
+		effectivePrompt = strings.TrimSpace(requestDebug.EffectiveUserPrompt)
+	}
 	if invokeErr != nil {
 		failure := describeExecutionFailure(invokeErr, true, apiDuration)
-		record := newExecutionRecord(request, account.Definition, correlationID, "failed", request.Prompt, failure.Message, failure.ErrorCode, failure.Retryable, startedAt, time.Now())
+		record := newExecutionRecord(request, account.Definition, correlationID, "failed", effectivePrompt, failure.Message, failure.ErrorCode, failure.Retryable, startedAt, time.Now())
 		p.appendExecutionHistory(request.UserID, record)
 		if postErr := p.postFailure(channel, request.RootID, account, correlationID, failure); postErr != nil {
 			p.API.LogError("Failed to post Doc2VLLM conversation error", "error", postErr, "correlation_id", correlationID)
@@ -330,20 +339,20 @@ func (p *Plugin) executeThreadConversation(
 		Request: buildSuccessRequestDebugPayload([]doc2vllmRequestDebug{requestDebug}, ""),
 	}, apiDuration)
 	if err != nil {
-		record := newExecutionRecord(request, account.Definition, correlationID, "failed", request.Prompt, err.Error(), "", true, startedAt, time.Now())
+		record := newExecutionRecord(request, account.Definition, correlationID, "failed", effectivePrompt, err.Error(), "", true, startedAt, time.Now())
 		p.appendExecutionHistory(request.UserID, record)
 		return nil, err
 	}
 
 	state.Turns = append(state.Turns,
-		conversationTurn{Role: "user", Content: request.Prompt},
+		conversationTurn{Role: "user", Content: effectivePrompt},
 		conversationTurn{Role: "assistant", Content: output},
 	)
 	if saveErr := p.saveThreadConversationState(*state); saveErr != nil {
 		p.API.LogWarn("Failed to update Doc2VLLM thread conversation", "error", saveErr, "root_id", request.RootID, "correlation_id", correlationID)
 	}
 
-	record := newExecutionRecord(request, account.Definition, correlationID, "completed", request.Prompt, "", "", false, startedAt, time.Now())
+	record := newExecutionRecord(request, account.Definition, correlationID, "completed", effectivePrompt, "", "", false, startedAt, time.Now())
 	p.appendExecutionHistory(request.UserID, record)
 	p.logUsage(cfg, correlationID, request, account.Definition, "completed", "")
 
