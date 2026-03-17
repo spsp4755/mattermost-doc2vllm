@@ -26,6 +26,7 @@ type DraftBot = {
     vllm_api_key: string;
     vllm_model: string;
     vllm_prompt: string;
+    vllm_scope?: string;
     allowed_teams: string[];
     allowed_channels: string[];
     allowed_users: string[];
@@ -177,7 +178,7 @@ function renderPlaceholder(args: any) {
             <div style={botLayout}>
                 <div style={{display: 'flex', flexDirection: 'column', gap: 8}}>
                     {config.bots.length === 0 && <div style={box}>{'아직 등록된 봇이 없습니다.'}</div>}
-                    {config.bots.map((item: DraftBot) => <button key={item.local_id} type='button' onClick={() => setSelected(item.local_id)} style={{...box, textAlign: 'left', borderColor: bot?.local_id === item.local_id ? 'rgba(var(--button-bg-rgb),.5)' : 'transparent'}}><strong>{item.display_name || '@new-bot'}</strong><div>{`@${item.username || 'username'}`}</div><div style={note}>{`${item.model} | ${item.output_mode} | temp=${item.temperature} | max_tokens=${item.max_tokens}${item.vllm_model ? ` | vLLM=${item.vllm_model}` : ''}`}</div></button>)}
+                    {config.bots.map((item: DraftBot) => <button key={item.local_id} type='button' onClick={() => setSelected(item.local_id)} style={{...box, textAlign: 'left', borderColor: bot?.local_id === item.local_id ? 'rgba(var(--button-bg-rgb),.5)' : 'transparent'}}><strong>{item.display_name || '@new-bot'}</strong><div>{`@${item.username || 'username'}`}</div><div style={note}>{`${item.model} | ${item.output_mode} | temp=${item.temperature} | max_tokens=${item.max_tokens}${item.vllm_model ? ` | refiner=${item.vllm_model} (${item.vllm_scope || 'postprocess'})` : ''}`}</div></button>)}
                 </div>
                 <div style={{display: 'flex', flexDirection: 'column', gap: 12}}>
                     {!bot && <div style={box}>{'왼쪽에서 봇을 선택하세요.'}</div>}
@@ -224,7 +225,16 @@ function renderPlaceholder(args: any) {
                                 <Field label={'vLLM URL'}><input disabled={disabled} style={field} value={bot.vllm_base_url} placeholder={'http://localhost:8000/v1'} onChange={(e) => updateBot(bot.local_id, {vllm_base_url: e.target.value})}/></Field>
                                 <Field label={'vLLM API Key'}><input disabled={disabled} type='password' style={field} value={bot.vllm_api_key} placeholder={'비워 두면 Authorization 헤더 없이 호출'} onChange={(e) => updateBot(bot.local_id, {vllm_api_key: e.target.value})}/></Field>
                             </div>
-                            <Field label={'vLLM Model'}><input disabled={disabled} style={field} value={bot.vllm_model} placeholder={'Qwen/Qwen2.5-7B-Instruct'} onChange={(e) => updateBot(bot.local_id, {vllm_model: e.target.value})}/></Field>
+                            <div style={row2}>
+                                <Field label={'Refiner Model'}><input disabled={disabled} style={field} value={bot.vllm_model} placeholder={'MiniMax-M2.5'} onChange={(e) => updateBot(bot.local_id, {vllm_model: e.target.value})}/></Field>
+                                <Field label={'Refiner Scope'}>
+                                    <select disabled={disabled} style={field} value={bot.vllm_scope || 'postprocess'} onChange={(e) => updateBot(bot.local_id, {vllm_scope: e.target.value})}>
+                                        <option value='postprocess'>{'Initial OCR only'}</option>
+                                        <option value='followups'>{'Follow-up chat only'}</option>
+                                        <option value='both'>{'Initial OCR + follow-ups'}</option>
+                                    </select>
+                                </Field>
+                            </div>
                             <Field label={'vLLM Prompt'}><textarea disabled={disabled} style={{...field, minHeight: 120}} value={bot.vllm_prompt} placeholder={'문서 내용을 분석해서 한국어로 요약해줘.\n\n사용자 요청:\n{{user_message}}\n\n문서:\n{{document_text}}'} onChange={(e) => updateBot(bot.local_id, {vllm_prompt: e.target.value})}/></Field>
                         </div>
                         <div style={row3}>
@@ -346,7 +356,7 @@ function buildConfig(config: DraftConfig): AdminPluginConfig {
     return {
         service: {base_url: config.service.base_url.trim(), auth_mode: auth(config.service.auth_mode), auth_token: config.service.auth_token.trim(), allow_hosts: config.service.allow_hosts.trim()},
         runtime: {default_timeout_seconds: num(config.runtime.default_timeout_seconds, 30), max_input_length: num(config.runtime.max_input_length, 4000), max_output_length: num(config.runtime.max_output_length, 8000), pdf_raster_dpi: num(config.runtime.pdf_raster_dpi, 200), max_pdf_pages: num(config.runtime.max_pdf_pages, 20), mask_sensitive_data: Boolean(config.runtime.mask_sensitive_data), enable_debug_logs: Boolean(config.runtime.enable_debug_logs), enable_usage_logs: Boolean(config.runtime.enable_usage_logs)},
-        bots: config.bots.map((item) => ({id: item.username.trim(), username: item.username.trim(), display_name: item.display_name.trim(), description: item.description.trim(), base_url: item.base_url.trim(), auth_mode: botAuth(item.auth_mode), auth_token: item.auth_token.trim(), model: item.model.trim() || defaultModel, output_mode: item.output_mode.trim() || 'markdown', ocr_prompt: item.ocr_prompt.trim(), temperature: numMin(item.temperature, 0, 0), max_tokens: num(item.max_tokens, 1024), top_p: numMin(item.top_p, 1, 0.1), mask_sensitive_data: Boolean(item.mask_sensitive_data), vllm_base_url: item.vllm_base_url.trim(), vllm_api_key: item.vllm_api_key.trim(), vllm_model: item.vllm_model.trim(), vllm_prompt: item.vllm_prompt.trim(), allowed_teams: split(join(item.allowed_teams), true), allowed_channels: split(join(item.allowed_channels), true), allowed_users: split(join(item.allowed_users), true)})),
+        bots: config.bots.map((item) => ({id: item.username.trim(), username: item.username.trim(), display_name: item.display_name.trim(), description: item.description.trim(), base_url: item.base_url.trim(), auth_mode: botAuth(item.auth_mode), auth_token: item.auth_token.trim(), model: item.model.trim() || defaultModel, output_mode: item.output_mode.trim() || 'markdown', ocr_prompt: item.ocr_prompt.trim(), temperature: numMin(item.temperature, 0, 0), max_tokens: num(item.max_tokens, 1024), top_p: numMin(item.top_p, 1, 0.1), mask_sensitive_data: Boolean(item.mask_sensitive_data), vllm_base_url: item.vllm_base_url.trim(), vllm_api_key: item.vllm_api_key.trim(), vllm_model: item.vllm_model.trim(), vllm_prompt: item.vllm_prompt.trim(), vllm_scope: text(item.vllm_scope).trim() || 'postprocess', allowed_teams: split(join(item.allowed_teams), true), allowed_channels: split(join(item.allowed_channels), true), allowed_users: split(join(item.allowed_users), true)})),
     };
 }
 
@@ -370,6 +380,7 @@ function normalizeBot(value: Partial<BotDefinition>, index = 0, inheritedMaskSen
         vllm_api_key: text(value.vllm_api_key),
         vllm_model: text(value.vllm_model),
         vllm_prompt: text(value.vllm_prompt),
+        vllm_scope: text(value.vllm_scope) || 'postprocess',
         allowed_teams: split(join(Array.isArray(value.allowed_teams) ? value.allowed_teams : []), true),
         allowed_channels: split(join(Array.isArray(value.allowed_channels) ? value.allowed_channels : []), true),
         allowed_users: split(join(Array.isArray(value.allowed_users) ? value.allowed_users : []), true),

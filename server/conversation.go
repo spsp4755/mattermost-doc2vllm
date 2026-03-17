@@ -8,6 +8,10 @@ import (
 )
 
 const threadConversationKeyPrefix = "thread_conversation_"
+const (
+	conversationTurnMemoryMaxLength   = 600
+	initialOCRAssistantMemoryFallback = "Initial OCR extraction completed. Use the stored document context for follow-up questions."
+)
 
 type threadConversationState struct {
 	BotID           string             `json:"bot_id"`
@@ -114,4 +118,43 @@ func buildConversationDocumentContext(prompt string, results []doc2vllmDocumentR
 	}
 
 	return truncateString(strings.TrimSpace(strings.Join(sections, "\n\n")), maxLength)
+}
+
+func buildConversationAssistantMemory(content string, initialOCR bool) string {
+	if initialOCR {
+		return initialOCRAssistantMemoryFallback
+	}
+
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return ""
+	}
+
+	lines := strings.Split(content, "\n")
+	normalizedLines := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "### ") ||
+			strings.HasPrefix(line, "## ") ||
+			strings.HasPrefix(line, "- Model:") ||
+			strings.HasPrefix(line, "- Prompt:") ||
+			strings.HasPrefix(line, "- Source:") ||
+			strings.HasPrefix(line, "- Processor:") ||
+			strings.HasPrefix(line, "- Output:") ||
+			strings.HasPrefix(line, "- Prompt Tokens:") ||
+			strings.HasPrefix(line, "- Completion Tokens:") ||
+			strings.HasPrefix(line, "- Total Tokens:") {
+			continue
+		}
+		normalizedLines = append(normalizedLines, line)
+	}
+
+	if len(normalizedLines) == 0 {
+		return truncateString(content, conversationTurnMemoryMaxLength)
+	}
+
+	return truncateString(strings.Join(normalizedLines, "\n"), conversationTurnMemoryMaxLength)
 }

@@ -1,7 +1,7 @@
 {
     "id": "com.mattermost.doc2vllm-ocr-test",
     "name": "Doc2VLLM OCR Test",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "Mattermost의 이미지 첨부와 메시지를 받아 Doc2VLLM OCR 모델로 텍스트를 추출하는 전용 봇 플러그인입니다.",
     "homepage_url": "https://docs.vllm.ai/",
     "support_url": "https://docs.vllm.ai/",

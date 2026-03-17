@@ -33,6 +33,7 @@ type BotDefinition struct {
 	VLLMAPIKey        string          `json:"vllm_api_key,omitempty"`
 	VLLMModel         string          `json:"vllm_model,omitempty"`
 	VLLMPrompt        string          `json:"vllm_prompt,omitempty"`
+	VLLMScope         string          `json:"vllm_scope,omitempty"`
 	FlowID            string          `json:"flow_id,omitempty"`
 	FileComponentID   string          `json:"file_component_id,omitempty"`
 	ImageComponentID  string          `json:"image_component_id,omitempty"`
@@ -73,6 +74,7 @@ func (b BotDefinition) normalize() (BotDefinition, error) {
 	b.VLLMAPIKey = strings.TrimSpace(b.VLLMAPIKey)
 	b.VLLMModel = strings.TrimSpace(b.VLLMModel)
 	b.VLLMPrompt = strings.TrimSpace(b.VLLMPrompt)
+	b.VLLMScope = normalizeVLLMScope(b.VLLMScope)
 	b.FlowID = strings.TrimSpace(b.FlowID)
 	b.FileComponentID = strings.TrimSpace(b.FileComponentID)
 	b.ImageComponentID = strings.TrimSpace(b.ImageComponentID)
@@ -165,6 +167,36 @@ func (b BotDefinition) hasVLLMPostProcess() bool {
 	return b.VLLMBaseURL != "" && b.VLLMModel != ""
 }
 
+func (b BotDefinition) effectiveVLLMScope() string {
+	return normalizeVLLMScope(b.VLLMScope)
+}
+
+func (b BotDefinition) shouldUseVLLMForPostProcess() bool {
+	if !b.hasVLLMPostProcess() {
+		return false
+	}
+
+	switch b.effectiveVLLMScope() {
+	case "both", "postprocess":
+		return true
+	default:
+		return false
+	}
+}
+
+func (b BotDefinition) shouldUseVLLMForFollowUps() bool {
+	if !b.hasVLLMPostProcess() {
+		return false
+	}
+
+	switch b.effectiveVLLMScope() {
+	case "both", "followups":
+		return true
+	default:
+		return false
+	}
+}
+
 func (b BotDefinition) publicView() BotDefinition {
 	copyBot := b
 	copyBot.AuthToken = ""
@@ -214,6 +246,17 @@ func normalizeOutputMode(value string) string {
 		return strings.ToLower(strings.TrimSpace(value))
 	default:
 		return defaultOutputMode
+	}
+}
+
+func normalizeVLLMScope(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "postprocess":
+		return "postprocess"
+	case "followups", "both":
+		return strings.ToLower(strings.TrimSpace(value))
+	default:
+		return "postprocess"
 	}
 }
 

@@ -20,6 +20,7 @@ type vllmServiceConfig struct {
 	APIKey        string
 	Model         string
 	Prompt        string
+	Scope         string
 	Timeout       time.Duration
 }
 
@@ -65,13 +66,21 @@ type vllmCallError struct {
 type vllmRequestDebug struct {
 	URL             string `json:"url"`
 	Model           string `json:"model"`
+	Task            string `json:"task,omitempty"`
+	Scope           string `json:"scope,omitempty"`
 	PromptTemplate  string `json:"prompt_template,omitempty"`
 	RenderedPrompt  string `json:"rendered_prompt_preview,omitempty"`
 	UserMessage     string `json:"user_message,omitempty"`
 	DocumentPreview string `json:"document_preview,omitempty"`
 	DocumentLength  int    `json:"document_length"`
+	HistoryPreview  string `json:"history_preview,omitempty"`
 	Correlation     string `json:"correlation_id,omitempty"`
 }
+
+const (
+	vllmTaskOCRRefine      = "ocr_refine"
+	vllmTaskFollowupAnswer = "followup_answer"
+)
 
 type vllmResponseDebug struct {
 	StatusCode int    `json:"status_code,omitempty"`
@@ -133,6 +142,7 @@ func (cfg *runtimeConfiguration) serviceConfigForVLLMBot(bot BotDefinition) (vll
 		APIKey:        strings.TrimSpace(bot.VLLMAPIKey),
 		Model:         strings.TrimSpace(bot.VLLMModel),
 		Prompt:        strings.TrimSpace(bot.VLLMPrompt),
+		Scope:         bot.effectiveVLLMScope(),
 		Timeout:       cfg.DefaultTimeout,
 	}, nil
 }
@@ -171,9 +181,11 @@ func (p *Plugin) invokeVLLMPostProcess(
 	service vllmServiceConfig,
 	userMessage string,
 	documentText string,
+	conversationHistory string,
+	task string,
 	correlationID string,
 ) (string, string, error) {
-	renderedPrompt := renderVLLMPrompt(service.Prompt, userMessage, documentText)
+	renderedPrompt := renderVLLMPrompt(service.Prompt, userMessage, documentText, conversationHistory, task)
 	requestPayload := vllmChatRequest{
 		Model: service.Model,
 		Messages: []vllmMessage{{
@@ -182,7 +194,7 @@ func (p *Plugin) invokeVLLMPostProcess(
 		}},
 		Stream: false,
 	}
-	requestDebug := buildVLLMRequestDebug(service, service.Prompt, renderedPrompt, userMessage, documentText, correlationID)
+	requestDebug := buildVLLMRequestDebug(service, task, service.Prompt, renderedPrompt, userMessage, documentText, conversationHistory, correlationID)
 
 	bodyBytes, err := json.Marshal(requestPayload)
 	if err != nil {
@@ -275,18 +287,29 @@ func (p *Plugin) invokeVLLMPostProcess(
 	return strings.TrimSpace(content), marshalDebugPayload(requestDebug), nil
 }
 
-func renderVLLMPrompt(template, userMessage, documentText string) string {
+func renderVLLMPrompt(template, userMessage, documentText, conversationHistory, task string) string {
 	template = strings.TrimSpace(template)
 	userMessage = strings.TrimSpace(userMessage)
 	documentText = strings.TrimSpace(documentText)
+	conversationHistory = strings.TrimSpace(conversationHistory)
+	task = strings.TrimSpace(task)
 
-	if strings.Contains(template, "{{document_text}}") || strings.Contains(template, "{{user_message}}") {
+	if template == "" {
+		template = defaultVLLMPromptTemplate(task)
+	}
+
+	if strings.Contains(template, "{{document_text}}") ||
+		strings.Contains(template, "{{user_message}}") ||
+		strings.Contains(template, "{{conversation_history}}") ||
+		strings.Contains(template, "{{task}}") {
 		rendered := strings.ReplaceAll(template, "{{document_text}}", documentText)
 		rendered = strings.ReplaceAll(rendered, "{{user_message}}", userMessage)
+		rendered = strings.ReplaceAll(rendered, "{{conversation_history}}", conversationHistory)
+		rendered = strings.ReplaceAll(rendered, "{{task}}", task)
 		return strings.TrimSpace(rendered)
 	}
 
-	parts := make([]string, 0, 3)
+	parts := make([]string, 0, 4)
 	if template != "" {
 		parts = append(parts, template)
 	}
@@ -299,15 +322,64 @@ func renderVLLMPrompt(template, userMessage, documentText string) string {
 	return strings.TrimSpace(strings.Join(parts, "\n\n"))
 }
 
-func buildVLLMRequestDebug(service vllmServiceConfig, promptTemplate, renderedPrompt, userMessage, documentText, correlationID string) vllmRequestDebug {
+func defaultVLLMPromptTemplate(task string) string {
+	switch strings.TrimSpace(task) {
+	case vllmTaskFollowupAnswer:
+		return strings.TrimSpace(`
+You are a document QA assistant.
+
+Answer only the current user request using the OCR document source below.
+
+Rules:
+- Do not repeat the full OCR text unless the user explicitly asks for it.
+- Do not invent missing values or unstated facts.
+- If the answer is not grounded in the document source, say that clearly.
+- Keep the answer concise and focused on the current request.
+
+[Current user request]
+{{user_message}}
+
+[Recent conversation]
+{{conversation_history}}
+
+[OCR document source]
+{{document_text}}
+`)
+	default:
+		return strings.TrimSpace(`
+You are a document fidelity editor helping improve OCR output.
+
+Use only the OCR document source and the current user request.
+
+Rules:
+- Preserve the original wording, order, and structure as faithfully as possible.
+- Never invent values, table cells, headers, totals, or field mappings.
+- If a table structure is clear from the source, preserve it carefully.
+- If the table structure is ambiguous, keep the raw line order instead of guessing.
+- Do not move values into different fields.
+- If the user asks a focused question, answer it only from the source.
+
+[Current user request]
+{{user_message}}
+
+[OCR document source]
+{{document_text}}
+`)
+	}
+}
+
+func buildVLLMRequestDebug(service vllmServiceConfig, task, promptTemplate, renderedPrompt, userMessage, documentText, conversationHistory, correlationID string) vllmRequestDebug {
 	return vllmRequestDebug{
 		URL:             strings.TrimSpace(service.BaseURL),
 		Model:           strings.TrimSpace(service.Model),
+		Task:            strings.TrimSpace(task),
+		Scope:           strings.TrimSpace(service.Scope),
 		PromptTemplate:  truncateString(strings.TrimSpace(promptTemplate), 2000),
 		RenderedPrompt:  truncateString(strings.TrimSpace(renderedPrompt), 4000),
 		UserMessage:     truncateString(strings.TrimSpace(userMessage), 1000),
 		DocumentPreview: truncateString(strings.TrimSpace(documentText), 4000),
 		DocumentLength:  len(documentText),
+		HistoryPreview:  truncateString(strings.TrimSpace(conversationHistory), 2000),
 		Correlation:     strings.TrimSpace(correlationID),
 	}
 }

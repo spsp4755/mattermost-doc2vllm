@@ -342,6 +342,7 @@ func buildDoc2VLLMSystemPrompt(bot BotDefinition, documentContext string, hasAtt
 		parts = append(parts, "Read the attached document carefully and answer in the same language as the user when possible.")
 	} else if strings.TrimSpace(documentContext) != "" {
 		parts = append(parts, "Use the previously extracted document context as the source of truth for follow-up answers. If the answer is not grounded in the document context, say so clearly.")
+		parts = append(parts, "Answer only the current user request. Do not repeat the full OCR transcript or the full document unless the user explicitly asks for it.")
 	}
 	return strings.TrimSpace(strings.Join(parts, "\n\n"))
 }
@@ -368,6 +369,9 @@ func buildDoc2VLLMUserPrompt(userPrompt, effectiveUserPrompt, documentContext st
 		currentRequest = effectiveUserPrompt
 	}
 	parts = append(parts, "[Current user request]\n"+defaultIfEmpty(strings.TrimSpace(currentRequest), "Please answer using the extracted document context."))
+	if !hasAttachment {
+		parts = append(parts, "[Answering rules]\nRespond to the current request only. Do not repeat the full OCR result unless explicitly requested.")
+	}
 	return strings.TrimSpace(strings.Join(parts, "\n\n"))
 }
 

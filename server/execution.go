@@ -186,8 +186,10 @@ func (p *Plugin) executeBotAndPost(ctx context.Context, request BotRunRequest) (
 
 	shouldMaskSensitive := bot.shouldMaskSensitiveData(cfg.MaskSensitiveData)
 	documentContext := buildDocumentResponseMarkdown(effectivePrompt, results, processingFailures, cfg.MaxOutputLength)
+	sourceDocumentContext := buildConversationDocumentContext(effectivePrompt, results, processingFailures, cfg.MaxOutputLength*2)
 	if shouldMaskSensitive {
 		documentContext = truncateString(maskSensitiveContent(documentContext), cfg.MaxOutputLength)
+		sourceDocumentContext = truncateString(maskSensitiveContent(sourceDocumentContext), cfg.MaxOutputLength*2)
 	}
 
 	output := buildDocumentResponseOutput(bot.effectiveOutputMode(), effectivePrompt, results, processingFailures, cfg.MaxOutputLength)
@@ -197,13 +199,13 @@ func (p *Plugin) executeBotAndPost(ctx context.Context, request BotRunRequest) (
 	debugView := successDebugView{
 		Request: buildSuccessRequestDebugPayload(requestDebugs, ""),
 	}
-	if bot.hasVLLMPostProcess() {
+	if bot.shouldUseVLLMForPostProcess() {
 		vllmConfig, vllmErr := cfg.serviceConfigForVLLMBot(*bot)
 		if vllmErr != nil {
 			output = buildVLLMFallbackOutput(documentContext, "vLLM 후처리 설정을 확인하지 못해 Doc2VLLM OCR 결과를 대신 표시합니다.")
 		}
 		if vllmErr == nil {
-			vllmOutput, vllmDebug, invokeErr := p.invokeVLLMPostProcess(ctx, vllmConfig, prompt, documentContext, correlationID)
+			vllmOutput, vllmDebug, invokeErr := p.invokeVLLMPostProcess(ctx, vllmConfig, effectivePrompt, sourceDocumentContext, "", vllmTaskOCRRefine, correlationID)
 			if invokeErr != nil {
 				failure := describeExecutionFailure(invokeErr, true, apiDurationTotal)
 				output = buildVLLMFallbackOutput(output, "vLLM 후처리에 실패해 Doc2VLLM OCR 결과를 대신 표시합니다.")
@@ -234,10 +236,10 @@ func (p *Plugin) executeBotAndPost(ctx context.Context, request BotRunRequest) (
 			BotID:           bot.ID,
 			ChannelID:       request.ChannelID,
 			RootID:          request.RootID,
-			DocumentContext: buildConversationDocumentContext(effectivePrompt, results, processingFailures, cfg.MaxOutputLength*2),
+			DocumentContext: sourceDocumentContext,
 			Turns: []conversationTurn{
 				{Role: "user", Content: effectivePrompt},
-				{Role: "assistant", Content: output},
+				{Role: "assistant", Content: buildConversationAssistantMemory(output, true)},
 			},
 		}
 		if saveErr := p.saveThreadConversationState(state); saveErr != nil {
@@ -288,56 +290,114 @@ func (p *Plugin) executeThreadConversation(
 		return nil, fmt.Errorf("thread conversation is already bound to a different bot")
 	}
 
-	serviceConfig, err := cfg.serviceConfigForBot(bot)
-	if err != nil {
-		return nil, err
-	}
-
-	response, requestDebug, apiDuration, _, invokeErr := p.invokeDoc2VLLMConversation(
-		ctx,
-		serviceConfig,
-		bot,
-		state.DocumentContext,
-		state.Turns,
-		request.Prompt,
-		correlationID,
-	)
 	effectivePrompt := strings.TrimSpace(request.Prompt)
-	if effectivePrompt == "" {
-		effectivePrompt = strings.TrimSpace(requestDebug.EffectiveUserPrompt)
-	}
-	if invokeErr != nil {
-		failure := describeExecutionFailure(invokeErr, true, apiDuration)
-		record := newExecutionRecord(request, account.Definition, correlationID, "failed", effectivePrompt, failure.Message, failure.ErrorCode, failure.Retryable, startedAt, time.Now())
-		p.appendExecutionHistory(request.UserID, record)
-		if postErr := p.postFailure(channel, request.RootID, account, correlationID, failure); postErr != nil {
-			p.API.LogError("Failed to post Doc2VLLM conversation error", "error", postErr, "correlation_id", correlationID)
+	apiDuration := time.Duration(0)
+	output := ""
+	debugView := successDebugView{}
+
+	if bot.shouldUseVLLMForFollowUps() {
+		vllmConfig, configErr := cfg.serviceConfigForVLLMBot(bot)
+		if configErr != nil {
+			return nil, configErr
 		}
-		return &BotRunResult{
-			CorrelationID: correlationID,
-			BotID:         account.Definition.ID,
-			BotUsername:   account.Definition.Username,
-			BotName:       account.Definition.DisplayName,
-			Model:         account.Definition.Model,
-			APIDurationMS: apiDuration.Milliseconds(),
-			Status:        "failed",
-			ErrorMessage:  failure.Message,
-			ErrorCode:     failure.ErrorCode,
-			ErrorDetail:   failure.Detail,
-			ErrorHint:     failure.Hint,
-			RequestURL:    failure.RequestURL,
-			HTTPStatus:    failure.HTTPStatus,
-			Retryable:     failure.Retryable,
-		}, invokeErr
+		if effectivePrompt == "" {
+			effectivePrompt = "Please continue using the extracted document context."
+		}
+
+		invokeStartedAt := time.Now()
+		vllmOutput, vllmDebug, invokeErr := p.invokeVLLMPostProcess(
+			ctx,
+			vllmConfig,
+			effectivePrompt,
+			state.DocumentContext,
+			buildDoc2VLLMConversationHistory(state.Turns),
+			vllmTaskFollowupAnswer,
+			correlationID,
+		)
+		apiDuration = time.Since(invokeStartedAt)
+		if invokeErr != nil {
+			failure := describeExecutionFailure(invokeErr, true, apiDuration)
+			record := newExecutionRecord(request, account.Definition, correlationID, "failed", effectivePrompt, failure.Message, failure.ErrorCode, failure.Retryable, startedAt, time.Now())
+			p.appendExecutionHistory(request.UserID, record)
+			if postErr := p.postFailure(channel, request.RootID, account, correlationID, failure); postErr != nil {
+				p.API.LogError("Failed to post Doc2VLLM conversation error", "error", postErr, "correlation_id", correlationID)
+			}
+			return &BotRunResult{
+				CorrelationID: correlationID,
+				BotID:         account.Definition.ID,
+				BotUsername:   account.Definition.Username,
+				BotName:       account.Definition.DisplayName,
+				Model:         account.Definition.Model,
+				APIDurationMS: apiDuration.Milliseconds(),
+				Status:        "failed",
+				ErrorMessage:  failure.Message,
+				ErrorCode:     failure.ErrorCode,
+				ErrorDetail:   failure.Detail,
+				ErrorHint:     failure.Hint,
+				RequestURL:    failure.RequestURL,
+				HTTPStatus:    failure.HTTPStatus,
+				Retryable:     failure.Retryable,
+			}, invokeErr
+		}
+
+		output = truncateString(strings.TrimSpace(vllmOutput), cfg.MaxOutputLength)
+		debugView = successDebugView{
+			Request: buildSuccessRequestDebugPayload(nil, vllmDebug),
+		}
+	} else {
+		serviceConfig, err := cfg.serviceConfigForBot(bot)
+		if err != nil {
+			return nil, err
+		}
+
+		response, requestDebug, invokeDuration, _, invokeErr := p.invokeDoc2VLLMConversation(
+			ctx,
+			serviceConfig,
+			bot,
+			state.DocumentContext,
+			state.Turns,
+			request.Prompt,
+			correlationID,
+		)
+		apiDuration = invokeDuration
+		if effectivePrompt == "" {
+			effectivePrompt = strings.TrimSpace(requestDebug.EffectiveUserPrompt)
+		}
+		if invokeErr != nil {
+			failure := describeExecutionFailure(invokeErr, true, apiDuration)
+			record := newExecutionRecord(request, account.Definition, correlationID, "failed", effectivePrompt, failure.Message, failure.ErrorCode, failure.Retryable, startedAt, time.Now())
+			p.appendExecutionHistory(request.UserID, record)
+			if postErr := p.postFailure(channel, request.RootID, account, correlationID, failure); postErr != nil {
+				p.API.LogError("Failed to post Doc2VLLM conversation error", "error", postErr, "correlation_id", correlationID)
+			}
+			return &BotRunResult{
+				CorrelationID: correlationID,
+				BotID:         account.Definition.ID,
+				BotUsername:   account.Definition.Username,
+				BotName:       account.Definition.DisplayName,
+				Model:         account.Definition.Model,
+				APIDurationMS: apiDuration.Milliseconds(),
+				Status:        "failed",
+				ErrorMessage:  failure.Message,
+				ErrorCode:     failure.ErrorCode,
+				ErrorDetail:   failure.Detail,
+				ErrorHint:     failure.Hint,
+				RequestURL:    failure.RequestURL,
+				HTTPStatus:    failure.HTTPStatus,
+				Retryable:     failure.Retryable,
+			}, invokeErr
+		}
+
+		output = truncateString(strings.TrimSpace(extractDoc2VLLMResponseText(response)), cfg.MaxOutputLength)
+		debugView = successDebugView{
+			Request: buildSuccessRequestDebugPayload([]doc2vllmRequestDebug{requestDebug}, ""),
+		}
 	}
 
-	output := truncateString(strings.TrimSpace(extractDoc2VLLMResponseText(response)), cfg.MaxOutputLength)
 	if bot.shouldMaskSensitiveData(cfg.MaskSensitiveData) {
 		output = truncateString(maskSensitiveContent(output), cfg.MaxOutputLength)
 	}
-	post, err := p.postSuccess(channel, request.RootID, account, correlationID, output, successDebugView{
-		Request: buildSuccessRequestDebugPayload([]doc2vllmRequestDebug{requestDebug}, ""),
-	}, apiDuration)
+	post, err := p.postSuccess(channel, request.RootID, account, correlationID, output, debugView, apiDuration)
 	if err != nil {
 		record := newExecutionRecord(request, account.Definition, correlationID, "failed", effectivePrompt, err.Error(), "", true, startedAt, time.Now())
 		p.appendExecutionHistory(request.UserID, record)
@@ -346,7 +406,7 @@ func (p *Plugin) executeThreadConversation(
 
 	state.Turns = append(state.Turns,
 		conversationTurn{Role: "user", Content: effectivePrompt},
-		conversationTurn{Role: "assistant", Content: output},
+		conversationTurn{Role: "assistant", Content: buildConversationAssistantMemory(output, false)},
 	)
 	if saveErr := p.saveThreadConversationState(*state); saveErr != nil {
 		p.API.LogWarn("Failed to update Doc2VLLM thread conversation", "error", saveErr, "root_id", request.RootID, "correlation_id", correlationID)

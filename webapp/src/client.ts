@@ -25,6 +25,7 @@ export type BotDefinition = {
     vllm_api_key?: string;
     vllm_model?: string;
     vllm_prompt?: string;
+    vllm_scope?: string;
     allowed_teams?: string[];
     allowed_channels?: string[];
     allowed_users?: string[];

@@ -53,8 +53,19 @@ func TestParseBotDefinitionsIncludesVLLMAndMasking(t *testing.T) {
 	require.Len(t, bots, 1)
 	require.True(t, bots[0].shouldMaskSensitiveData(false))
 	require.True(t, bots[0].hasVLLMPostProcess())
+	require.True(t, bots[0].shouldUseVLLMForPostProcess())
+	require.False(t, bots[0].shouldUseVLLMForFollowUps())
 	require.Equal(t, "http://localhost:8000/v1", bots[0].VLLMBaseURL)
 	require.Equal(t, "Qwen/Qwen2.5-7B-Instruct", bots[0].VLLMModel)
+}
+
+func TestParseBotDefinitionsSupportsVLLMScope(t *testing.T) {
+	bots, err := parseBotDefinitions(`[{"username":"summary-bot","display_name":"Thread Summary","vllm_base_url":"http://localhost:8000/v1","vllm_model":"MiniMax-M2.5","vllm_scope":"both"}]`)
+	require.NoError(t, err)
+	require.Len(t, bots, 1)
+	require.Equal(t, "both", bots[0].effectiveVLLMScope())
+	require.True(t, bots[0].shouldUseVLLMForPostProcess())
+	require.True(t, bots[0].shouldUseVLLMForFollowUps())
 }
 
 func TestConfigurationGetStoredPluginConfigDefaultsWhenEmpty(t *testing.T) {
@@ -606,13 +617,24 @@ func TestClassifyDoc2VLLMRequestErrorTimeout(t *testing.T) {
 
 func TestRenderVLLMPromptSupportsPlaceholders(t *testing.T) {
 	rendered := renderVLLMPrompt(
-		"사용자 요청:\n{{user_message}}\n\n문서:\n{{document_text}}",
-		"표를 요약해줘",
-		"문서 내용",
+		"User request:\n{{user_message}}\n\nDocument:\n{{document_text}}",
+		"Summarize the table",
+		"Document body",
+		"",
+		vllmTaskOCRRefine,
 	)
 
-	require.Contains(t, rendered, "표를 요약해줘")
-	require.Contains(t, rendered, "문서 내용")
+	require.Contains(t, rendered, "Summarize the table")
+	require.Contains(t, rendered, "Document body")
+}
+
+func TestRenderVLLMPromptDefaultFollowupTemplateIncludesHistory(t *testing.T) {
+	rendered := renderVLLMPrompt("", "What is the invoice number?", "Invoice No: 2026-001", "User: summarize\nAssistant: ready", vllmTaskFollowupAnswer)
+
+	require.Contains(t, rendered, "What is the invoice number?")
+	require.Contains(t, rendered, "Invoice No: 2026-001")
+	require.Contains(t, rendered, "User: summarize")
+	require.Contains(t, rendered, "Do not repeat the full OCR text")
 }
 
 func TestBuildVLLMFallbackOutputIncludesDocumentContext(t *testing.T) {
