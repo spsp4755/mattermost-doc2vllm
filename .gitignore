@@ -10,8 +10,13 @@ server.exe
 .codex-cache/
 .hf-cache/
 artifacts/ocr-smoke/
+.gocache/
+.gomodcache/
+artifacts/
 __pycache__/
 *.pyc
+*.bak.codex
+codex_test.tmp
 
 # Mac
 .DS_Store
