@@ -30,23 +30,23 @@ export default class PluginErrorBoundary extends React.PureComponent<Props, Stat
     public static getDerivedStateFromError(error: Error): State {
         return {
             hasError: true,
-            message: error.message || '알 수 없는 오류가 발생했습니다.',
+            message: error.message || '\uc54c \uc218 \uc5c6\ub294 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4.',
         };
     }
 
     public componentDidCatch(error: Error, info: React.ErrorInfo) {
         // eslint-disable-next-line no-console
-        console.error(`[Doc2VLLM OCR] ${this.props.area} 렌더링 오류`, error, info);
+        console.error(`[Doc2VLLM OCR] ${this.props.area} render error`, error, info);
     }
 
     public render() {
         if (this.state.hasError) {
             return (
                 <div style={containerStyle}>
-                    <strong>{`${this.props.area} 화면을 불러오지 못했습니다.`}</strong>
+                    <strong>{`${this.props.area} \ud654\uba74\uc744 \ubd88\ub7ec\uc624\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4.`}</strong>
                     <span>{this.state.message}</span>
                     <span style={{fontSize: '12px', opacity: 0.85}}>
-                        {'페이지를 새로고침한 뒤 다시 열어 보세요. 문제가 계속되면 플러그인 로그와 브라우저 콘솔을 함께 확인해 주세요.'}
+                        {'\ud398\uc774\uc9c0\ub97c \uc0c8\ub85c\uace0\uce68\ud558\uac70\ub098 \ub2e4\uc2dc \uc5f4\uc5b4 \ubcf4\uc138\uc694. \ubb38\uc81c\uac00 \uacc4\uc18d\ub418\uba74 \ud50c\ub7ec\uadf8\uc778 \ub85c\uadf8\uc640 \ube0c\ub77c\uc6b0\uc800 \ucf58\uc194\uc744 \ud568\uaed8 \ud655\uc778\ud574 \uc8fc\uc138\uc694.'}
                     </span>
                 </div>
             );
@@ -55,4 +55,3 @@ export default class PluginErrorBoundary extends React.PureComponent<Props, Stat
         return this.props.children;
     }
 }
-

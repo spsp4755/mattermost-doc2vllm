@@ -13,14 +13,12 @@ import PostEventListener from './post_event_listener';
 import {buildPluginWebSocketEventName, handleStreamingPostUpdateEvent} from './streaming';
 import type {PluginRegistry} from './types/mattermost-webapp';
 
-const Doc2VLLMTitle = () => {
-    return (
-        <span style={{display: 'inline-flex', alignItems: 'center', gap: '8px'}}>
-            <span style={badgeStyle}>{'DV'}</span>
-            {'Doc2VLLM OCR'}
-        </span>
-    );
-};
+const Doc2VLLMTitle = () => (
+    <span style={{display: 'inline-flex', alignItems: 'center', gap: '8px'}}>
+        <span style={badgeStyle}>{'DV'}</span>
+        {'Doc2VLLM OCR'}
+    </span>
+);
 
 const badgeStyle: React.CSSProperties = {
     alignItems: 'center',
@@ -38,19 +36,19 @@ const badgeStyle: React.CSSProperties = {
 const HeaderIcon = () => <span style={badgeStyle}>{'DV'}</span>;
 
 const SafeConfigSetting = (props: React.ComponentProps<typeof ConfigSetting>) => (
-    <PluginErrorBoundary area={'관리자 설정'}>
+    <PluginErrorBoundary area={'\uad00\ub9ac\uc790 \uc124\uc815'}>
         <ConfigSetting {...props}/>
     </PluginErrorBoundary>
 );
 
 const SafeRHSPane = () => (
-    <PluginErrorBoundary area={'Doc2VLLM 사이드바'}>
+    <PluginErrorBoundary area={'Doc2VLLM \uc0ac\uc774\ub4dc\ubc14'}>
         <RHSPane/>
     </PluginErrorBoundary>
 );
 
 const SafeDoc2VLLMBotPost = (props: React.ComponentProps<typeof Doc2VLLMBotPost>) => (
-    <PluginErrorBoundary area={'Doc2VLLM 봇 포스트'}>
+    <PluginErrorBoundary area={'Doc2VLLM \ubd07 \ud3ec\uc2a4\ud2b8'}>
         <Doc2VLLMBotPost {...props}/>
     </PluginErrorBoundary>
 );
@@ -93,7 +91,7 @@ export default class Plugin {
                 <HeaderIcon/>,
                 () => store.dispatch(rhs.toggleRHSPlugin as any),
                 'Doc2VLLM OCR',
-                'Doc2VLLM OCR 열기',
+                'Doc2VLLM OCR \uc5f4\uae30',
             );
         }
     }
@@ -106,4 +104,3 @@ declare global {
 }
 
 window.registerPlugin(manifest.id, new Plugin());
-

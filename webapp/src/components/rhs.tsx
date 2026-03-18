@@ -53,7 +53,9 @@ export default function RHSPane() {
             }
         }
         void load();
-        return () => { cancelled = true; };
+        return () => {
+            cancelled = true;
+        };
     }, [channelId]);
 
     async function submit() {
@@ -67,7 +69,7 @@ export default function RHSPane() {
             setLastResult(result);
             setPrompt('');
             setHistory(await getHistory(5));
-            setMessage(`@${bot.username} 봇이 Mattermost 스레드에 응답을 게시했습니다.`);
+            setMessage(`@${bot.username} \ubd07\uc774 Mattermost \uc2a4\ub808\ub4dc\uc5d0 \uc751\ub2f5\uc744 \uac8c\uc2dc\ud588\uc2b5\ub2c8\ub2e4.`);
         } catch (e) {
             setMessage((e as Error).message);
         } finally {
@@ -75,47 +77,47 @@ export default function RHSPane() {
         }
     }
 
-    return <div style={{display: 'flex', flexDirection: 'column', gap: 16, padding: 16}}>
-        <section style={card}>
-            <strong>{'Doc2VLLM OCR'}</strong>
-            <span style={{fontSize: 12, opacity: .8}}>{'현재 선택한 포스트의 첨부 이미지, PDF, DOCX, XLSX, PPTX를 처리합니다. PDF는 페이지 이미지로 렌더링하고, Office 문서는 본문 텍스트를 직접 추출합니다.'}</span>
-            {loading && <span>{'봇 목록을 불러오는 중입니다...'}</span>}
-            {!loading && bots.length === 0 && <span>{'현재 채널에서 사용할 수 있는 Doc2VLLM OCR 봇이 없습니다.'}</span>}
-            {!loading && bots.length > 0 && <>
-                <select style={field} value={bot?.id || ''} onChange={(e) => setSelectedBotId(e.target.value)}>
-                    {bots.map((item) => <option key={item.id} value={item.id}>{`${item.display_name || item.username} (@${item.username})`}</option>)}
-                </select>
-                <div style={{fontSize: 12, opacity: .8}}>{`Model: ${bot?.model || 'doc2vllm-ocr'} | output=${bot?.output_mode || 'markdown'} | temp=${bot?.temperature ?? 0} | max_tokens=${bot?.max_tokens ?? 1024}${bot?.vllm_model ? ` | vLLM=${bot.vllm_model}` : ''}`}</div>
-                {bot?.description && <span style={{opacity: .8}}>{bot.description}</span>}
-                <div style={{fontSize: 12, opacity: .8}}>{selectedPostId ? (fileNames.length > 0 ? `첨부 파일: ${fileNames.join(', ')}` : '첨부 파일이 없습니다. 이미지, PDF, DOCX, XLSX, PPTX가 있는 포스트를 선택해 주세요.') : '포스트에서 RHS를 열면 해당 첨부 이미지, PDF, DOCX, XLSX, PPTX를 바로 처리할 수 있습니다.'}</div>
-                <textarea style={{...field, resize: 'vertical'}} rows={5} value={prompt} placeholder={'예: 표와 텍스트를 모두 추출해줘'} onChange={(e) => setPrompt(e.target.value)}/>
-                <button className='btn btn-primary' type='button' disabled={submitting || !bot || !channelId || fileIds.length === 0} onClick={submit}>{submitting ? 'OCR 요청 중...' : `@${bot?.username || 'bot'}로 실행`}</button>
-            </>}
-            {message && <span>{message}</span>}
-        </section>
+    return (
+        <div style={{display: 'flex', flexDirection: 'column', gap: 16, padding: 16}}>
+            <section style={card}>
+                <strong>{'Doc2VLLM OCR'}</strong>
+                <span style={{fontSize: 12, opacity: .8}}>{'\ud604\uc7ac \uc120\ud0dd\ud55c \ud3ec\uc2a4\ud2b8\uc758 \ucca8\ubd80 \ud30c\uc77c\uc744 \ubc14\ub85c \ucc98\ub9ac\ud569\ub2c8\ub2e4.'}</span>
+                {loading && <span>{'\ubd07 \ubaa9\ub85d\uc744 \ubd88\ub7ec\uc624\ub294 \uc911\uc785\ub2c8\ub2e4...'}</span>}
+                {!loading && bots.length === 0 && <span>{'\ud604\uc7ac \ucc44\ub110\uc5d0\uc11c \uc0ac\uc6a9\ud560 \uc218 \uc788\ub294 \ubd07\uc774 \uc5c6\uc2b5\ub2c8\ub2e4.'}</span>}
+                {!loading && bots.length > 0 && (
+                    <>
+                        <select style={field} value={bot?.id || ''} onChange={(e) => setSelectedBotId(e.target.value)}>
+                            {bots.map((item) => <option key={item.id} value={item.id}>{`${item.display_name || item.username} (@${item.username})`}</option>)}
+                        </select>
+                        <div style={{fontSize: 12, opacity: .8}}>{selectedPostId ? (fileNames.length > 0 ? `\ucca8\ubd80 \ud30c\uc77c: ${fileNames.join(', ')}` : '\ucca8\ubd80 \ud30c\uc77c\uc774 \uc5c6\uc2b5\ub2c8\ub2e4.') : '\ud3ec\uc2a4\ud2b8\uc5d0\uc11c RHS\ub97c \uc5f4\uc5b4 \ubc14\ub85c \ucc98\ub9ac\ud560 \uc218 \uc788\uc2b5\ub2c8\ub2e4.'}</div>
+                        <textarea style={{...field, resize: 'vertical'}} rows={5} value={prompt} placeholder={'\uc608: \ud45c\uc640 \ud14d\uc2a4\ud2b8\ub97c \ubaa8\ub450 \ucd94\ucd9c\ud574\uc918'} onChange={(e) => setPrompt(e.target.value)}/>
+                        <button className='btn btn-primary' type='button' disabled={submitting || !bot || !channelId || fileIds.length === 0} onClick={submit}>{submitting ? '\uc694\uccad \uc911...' : `@${bot?.username || 'bot'}\ub85c \uc2e4\ud589`}</button>
+                    </>
+                )}
+                {message && <span>{message}</span>}
+            </section>
 
-        {lastResult && <section style={card}>
-            <strong>{'최근 실행 결과'}</strong>
-            <div>{`${lastResult.bot_name || lastResult.bot_username} - ${lastResult.status}`}</div>
-            <div>{`Model: ${lastResult.model}`}</div>
-            {typeof lastResult.api_duration_ms === 'number' && lastResult.api_duration_ms > 0 && <div>{`API 응답 시간: ${(lastResult.api_duration_ms / 1000).toFixed(2)}초`}</div>}
-            {lastResult.output && <div style={{fontSize: 12, opacity: .8, whiteSpace: 'pre-wrap'}}>{cut(lastResult.output, 400)}</div>}
-            {lastResult.error_message && <div style={{whiteSpace: 'pre-wrap'}}>{lastResult.error_message}</div>}
-            {lastResult.error_code && <div>{`Code: ${lastResult.error_code}`}</div>}
-            {lastResult.request_url && <div style={{wordBreak: 'break-all'}}>{`URL: ${lastResult.request_url}`}</div>}
-            {lastResult.correlation_id && <div>{`Correlation: ${lastResult.correlation_id}`}</div>}
-        </section>}
+            {lastResult && (
+                <section style={card}>
+                    <strong>{'\ucd5c\uadfc \uc2e4\ud589 \uacb0\uacfc'}</strong>
+                    <div>{`${lastResult.bot_name || lastResult.bot_username} - ${lastResult.status}`}</div>
+                    <div>{`Model: ${lastResult.model}`}</div>
+                    {typeof lastResult.api_duration_ms === 'number' && lastResult.api_duration_ms > 0 && <div>{`API: ${(lastResult.api_duration_ms / 1000).toFixed(2)}s`}</div>}
+                    {lastResult.output && <div style={{fontSize: 12, opacity: .8, whiteSpace: 'pre-wrap'}}>{cut(lastResult.output, 400)}</div>}
+                    {lastResult.error_message && <div style={{whiteSpace: 'pre-wrap'}}>{lastResult.error_message}</div>}
+                </section>
+            )}
 
-        <section style={card}>
-            <strong>{'최근 기록'}</strong>
-            {history.length === 0 && <span>{'아직 실행 기록이 없습니다.'}</span>}
-            {history.map((item) => <div key={item.correlation_id} style={{fontSize: 12}}><strong>{item.bot_name || item.bot_username}</strong><div>{`@${item.bot_username} -> ${item.model}`}</div><div>{`${item.status} via ${item.source}`}</div>{item.error_message && <div style={{whiteSpace: 'pre-wrap'}}>{item.error_message}</div>}</div>)}
-        </section>
-    </div>;
+            <section style={card}>
+                <strong>{'\ucd5c\uadfc \uae30\ub85d'}</strong>
+                {history.length === 0 && <span>{'\uc544\uc9c1 \uc2e4\ud589 \uae30\ub85d\uc774 \uc5c6\uc2b5\ub2c8\ub2e4.'}</span>}
+                {history.map((item) => <div key={item.correlation_id} style={{fontSize: 12}}><strong>{item.bot_name || item.bot_username}</strong><div>{`@${item.bot_username} -> ${item.model}`}</div><div>{`${item.status} via ${item.source}`}</div>{item.error_message && <div style={{whiteSpace: 'pre-wrap'}}>{item.error_message}</div>}</div>)}
+            </section>
+        </div>
+    );
 }
 
 function cut(value: string, max: number) {
     const next = (value || '').trim();
-    return next.length <= max ? next : `${next.slice(0, max - 1)}…`;
+    return next.length <= max ? next : `${next.slice(0, max - 1)}...`;
 }
-
