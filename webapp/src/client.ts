@@ -15,11 +15,16 @@ export type BotDefinition = {
     auth_mode?: string;
     auth_token?: string;
     model?: string;
+    mode?: string;
     output_mode?: string;
     ocr_prompt?: string;
     temperature?: number;
     max_tokens?: number;
     top_p?: number;
+    repetition_penalty?: number;
+    presence_penalty?: number;
+    frequency_penalty?: number;
+    extra_request_json?: string;
     mask_sensitive_data?: boolean;
     vllm_base_url?: string;
     vllm_api_key?: string;

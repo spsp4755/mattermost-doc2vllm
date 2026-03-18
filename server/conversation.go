@@ -88,15 +88,24 @@ func normalizeConversationTurns(turns []conversationTurn) []conversationTurn {
 	return normalized
 }
 
-func buildConversationDocumentContext(prompt string, results []doc2vllmDocumentResult, failures []documentProcessingFailure, maxLength int) string {
+func conversationTurnsForFollowup(turns []conversationTurn) []conversationTurn {
+	normalized := normalizeConversationTurns(turns)
+	if len(normalized) >= 2 &&
+		normalized[0].Role == "user" &&
+		normalized[1].Role == "assistant" &&
+		normalized[1].Content == initialOCRAssistantMemoryFallback {
+		return normalized[2:]
+	}
+
+	return normalized
+}
+
+func buildConversationDocumentContext(_ string, results []doc2vllmDocumentResult, failures []documentProcessingFailure, maxLength int) string {
 	sections := make([]string, 0, len(results))
 	for _, result := range results {
 		_, content := buildRenderableDoc2VLLMContent(result.Response)
 		lines := []string{
 			fmt.Sprintf("[Document] %s", result.Attachment.Name),
-		}
-		if strings.TrimSpace(result.RequestPrompt) != "" {
-			lines = append(lines, fmt.Sprintf("Prompt: %s", result.RequestPrompt))
 		}
 		if strings.TrimSpace(result.Source) != "" {
 			lines = append(lines, fmt.Sprintf("Source: %s", result.Source))
@@ -112,9 +121,6 @@ func buildConversationDocumentContext(prompt string, results []doc2vllmDocumentR
 
 	if len(failures) > 0 {
 		sections = append(sections, "[Processing failures]\n"+summarizeDocumentFailureMessages(failures, 5))
-	}
-	if strings.TrimSpace(prompt) != "" {
-		sections = append([]string{"[Initial user request]\n" + strings.TrimSpace(prompt)}, sections...)
 	}
 
 	return truncateString(strings.TrimSpace(strings.Join(sections, "\n\n")), maxLength)

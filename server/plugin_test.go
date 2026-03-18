@@ -1,4 +1,4 @@
-package main
+﻿package main
 
 import (
 	"archive/zip"
@@ -219,12 +219,12 @@ func TestBuildDoc2VLLMChatRequest(t *testing.T) {
 	require.True(t, ok)
 	require.Len(t, userContent, 2)
 	require.Equal(t, "text", userContent[0].Type)
-	require.Equal(t, bot.OCRPrompt, userContent[0].Text)
+	require.Equal(t, defaultDoc2VLLMAttachmentUserPrompt, userContent[0].Text)
 	require.Equal(t, "image_url", userContent[1].Type)
 	require.True(t, strings.HasPrefix(userContent[1].ImageURL.URL, "data:image/png;base64,"))
 	require.Contains(t, requestDebug.SystemPrompt, bot.OCRPrompt)
 	require.Empty(t, requestDebug.UserPrompt)
-	require.Equal(t, bot.OCRPrompt, requestDebug.EffectiveUserPrompt)
+	require.Equal(t, defaultDoc2VLLMAttachmentUserPrompt, requestDebug.EffectiveUserPrompt)
 	require.Len(t, requestDebug.Messages, 2)
 	require.Equal(t, "text", requestDebug.Messages[0].ContentType)
 	require.Equal(t, "multimodal", requestDebug.Messages[1].ContentType)
@@ -249,23 +249,26 @@ func TestBuildDoc2VLLMChatRequestIncludesDocumentContextForConversation(t *testi
 		"corr-456",
 	)
 	require.NoError(t, err)
-	require.Len(t, requestPayload.Messages, 2)
+	require.Len(t, requestPayload.Messages, 3)
 	require.Equal(t, "system", requestPayload.Messages[0].Role)
 	systemContent, ok := requestPayload.Messages[0].Content.(string)
 	require.True(t, ok)
-	require.Contains(t, systemContent, "OCR document assistant")
-	require.Equal(t, "user", requestPayload.Messages[1].Role)
-	userContent, ok := requestPayload.Messages[1].Content.(string)
+	require.Contains(t, systemContent, "document question-answering assistant")
+	require.Contains(t, systemContent, "Invoice No: 2026-001")
+	require.Equal(t, "assistant", requestPayload.Messages[1].Role)
+	historyContent, ok := requestPayload.Messages[1].Content.(string)
 	require.True(t, ok)
-	require.Contains(t, userContent, "Invoice No: 2026-001")
-	require.Contains(t, userContent, "Assistant: Previous OCR output")
+	require.Equal(t, "Previous OCR output", historyContent)
+	require.Equal(t, "user", requestPayload.Messages[2].Role)
+	userContent, ok := requestPayload.Messages[2].Content.(string)
+	require.True(t, ok)
 	require.Contains(t, userContent, "What is the invoice number?")
 }
 
 func TestBuildDoc2VLLMImageDataURLRejectsNonImages(t *testing.T) {
 	_, err := buildDoc2VLLMImageDataURL(botAttachment{Name: "sample.pdf", MIMEType: "application/pdf", Content: []byte("pdf")})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "이미지 첨부만 지원")
+	require.Contains(t, err.Error(), "supports image attachments only")
 }
 
 func TestPrepareOCRInputsKeepsImages(t *testing.T) {
@@ -599,7 +602,7 @@ func TestClassifyDoc2VLLMHTTPErrorUnauthorized(t *testing.T) {
 	)
 
 	require.Equal(t, "auth_failed", err.Code)
-	require.Equal(t, "Doc2VLLM 인증에 실패했습니다.", err.Summary)
+	require.Equal(t, "Doc2VLLM authentication failed.", err.Summary)
 	require.Contains(t, err.Detail, "invalid token")
 	require.False(t, err.Retryable)
 }
@@ -612,7 +615,7 @@ func TestClassifyDoc2VLLMRequestErrorTimeout(t *testing.T) {
 
 	require.Equal(t, "network_timeout", err.Code)
 	require.True(t, err.Retryable)
-	require.Contains(t, err.Error(), "시간 초과")
+	require.Contains(t, err.Error(), "timed out")
 }
 
 func TestRenderVLLMPromptSupportsPlaceholders(t *testing.T) {
@@ -716,10 +719,10 @@ func TestBuildConversationDocumentContextIncludesResultsAndFailures(t *testing.T
 		Message:        "conversion failed",
 	}}, 4000)
 
-	require.Contains(t, contextText, "[Initial user request]")
 	require.Contains(t, contextText, "[Document] invoice.png")
 	require.Contains(t, contextText, "Invoice No: 2026-001")
 	require.Contains(t, contextText, "appendix.pdf")
+	require.NotContains(t, contextText, "[Initial user request]")
 }
 
 func buildTestDOCX(t *testing.T, files map[string]string) []byte {

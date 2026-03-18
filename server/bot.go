@@ -23,11 +23,16 @@ type BotDefinition struct {
 	AuthMode          string          `json:"auth_mode,omitempty"`
 	AuthToken         string          `json:"auth_token,omitempty"`
 	Model             string          `json:"model,omitempty"`
+	Mode              string          `json:"mode,omitempty"`
 	OutputMode        string          `json:"output_mode,omitempty"`
 	OCRPrompt         string          `json:"ocr_prompt,omitempty"`
 	Temperature       float64         `json:"temperature,omitempty"`
 	MaxTokens         int             `json:"max_tokens,omitempty"`
 	TopP              float64         `json:"top_p,omitempty"`
+	RepetitionPenalty float64         `json:"repetition_penalty,omitempty"`
+	PresencePenalty   float64         `json:"presence_penalty,omitempty"`
+	FrequencyPenalty  float64         `json:"frequency_penalty,omitempty"`
+	ExtraRequestJSON  string          `json:"extra_request_json,omitempty"`
 	MaskSensitiveData *bool           `json:"mask_sensitive_data,omitempty"`
 	VLLMBaseURL       string          `json:"vllm_base_url,omitempty"`
 	VLLMAPIKey        string          `json:"vllm_api_key,omitempty"`
@@ -65,11 +70,16 @@ func (b BotDefinition) normalize() (BotDefinition, error) {
 	}
 	b.AuthToken = strings.TrimSpace(b.AuthToken)
 	b.Model = defaultIfEmpty(strings.TrimSpace(b.Model), defaultDoc2VLLMModel)
+	b.Mode = normalizeBotMode(b.Mode)
 	b.OutputMode = normalizeOutputMode(b.OutputMode)
 	b.OCRPrompt = strings.TrimSpace(b.OCRPrompt)
 	b.Temperature = normalizeDoc2VLLMTemperature(b.Temperature)
 	b.MaxTokens = positiveOrDefault(b.MaxTokens, defaultDoc2VLLMMaxTokens)
 	b.TopP = normalizeDoc2VLLMTopP(b.TopP)
+	b.RepetitionPenalty = normalizeRepetitionPenalty(b.RepetitionPenalty)
+	b.PresencePenalty = normalizePenalty(b.PresencePenalty)
+	b.FrequencyPenalty = normalizePenalty(b.FrequencyPenalty)
+	b.ExtraRequestJSON = strings.TrimSpace(b.ExtraRequestJSON)
 	b.VLLMBaseURL = strings.TrimSpace(b.VLLMBaseURL)
 	b.VLLMAPIKey = strings.TrimSpace(b.VLLMAPIKey)
 	b.VLLMModel = strings.TrimSpace(b.VLLMModel)
@@ -122,6 +132,9 @@ func (b BotDefinition) effectiveDoc2VLLMPrompt(userPrompt string) string {
 	if value := strings.TrimSpace(b.OCRPrompt); value != "" {
 		return value
 	}
+	if b.effectiveMode() == "multimodal" {
+		return defaultDoc2VLLMMultimodalPrompt
+	}
 	return defaultDoc2VLLMOCRPrompt
 }
 
@@ -129,15 +142,21 @@ func (b BotDefinition) effectiveOCRInstruction() string {
 	if value := strings.TrimSpace(b.OCRPrompt); value != "" {
 		return value
 	}
+	if b.effectiveMode() == "multimodal" {
+		return defaultDoc2VLLMMultimodalPrompt
+	}
 	return defaultDoc2VLLMOCRPrompt
 }
 
-func (b BotDefinition) supportsDocumentConversation() bool {
-	model := strings.ToLower(strings.TrimSpace(b.Model))
-	return strings.Contains(model, "glm-ocr") ||
-		strings.Contains(model, "paddleocr-vl") ||
-		strings.Contains(model, "hunyuanocr") ||
-		strings.Contains(model, "ocr")
+func (b BotDefinition) effectiveAttachmentUserPrompt(userPrompt string) string {
+	if value := strings.TrimSpace(userPrompt); value != "" {
+		return value
+	}
+	return defaultDoc2VLLMAttachmentUserPrompt
+}
+
+func (b BotDefinition) effectiveMode() string {
+	return normalizeBotMode(b.Mode)
 }
 
 func (b BotDefinition) effectiveDoc2VLLMTemperature() float64 {
@@ -236,6 +255,38 @@ func normalizeDoc2VLLMTopP(value float64) float64 {
 		return defaultDoc2VLLMTopP
 	}
 	return value
+}
+
+func normalizePenalty(value float64) float64 {
+	if value < -2 {
+		return -2
+	}
+	if value > 2 {
+		return 2
+	}
+	return value
+}
+
+func normalizeRepetitionPenalty(value float64) float64 {
+	if value == 0 {
+		return 1
+	}
+	if value < 0.1 {
+		return 0.1
+	}
+	if value > 2 {
+		return 2
+	}
+	return value
+}
+
+func normalizeBotMode(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "multimodal", "vision", "vlm":
+		return "multimodal"
+	default:
+		return "ocr"
+	}
 }
 
 func normalizeOutputMode(value string) string {

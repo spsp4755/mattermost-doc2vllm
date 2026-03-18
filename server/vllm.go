@@ -313,6 +313,9 @@ func renderVLLMPrompt(template, userMessage, documentText, conversationHistory, 
 	if template != "" {
 		parts = append(parts, template)
 	}
+	if conversationHistory != "" {
+		parts = append(parts, "[Recent conversation]\n"+conversationHistory)
+	}
 	if userMessage != "" {
 		parts = append(parts, "[사용자 요청]\n"+userMessage)
 	}

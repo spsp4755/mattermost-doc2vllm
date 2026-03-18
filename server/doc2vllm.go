@@ -1,4 +1,4 @@
-package main
+﻿package main
 
 import (
 	"bytes"
@@ -17,8 +17,12 @@ import (
 )
 
 const (
-	defaultDoc2VLLMOCRPrompt = "이미지에서 텍스트를 추출해 주세요."
+	defaultDoc2VLLMOCRPrompt = "Extract the visible text from the attached document faithfully without inventing missing content."
 )
+
+const defaultDoc2VLLMFollowupPrompt = "Please answer using the extracted document context."
+const defaultDoc2VLLMAttachmentUserPrompt = "Please process the attached document according to the system instructions."
+const defaultDoc2VLLMMultimodalPrompt = "Analyze the attached image or document and answer using only its visible contents."
 
 type doc2vllmServiceConfig struct {
 	BaseURL       string
@@ -113,6 +117,7 @@ type doc2vllmRequestDebug struct {
 	URL                 string                  `json:"url"`
 	AuthMode            string                  `json:"auth_mode"`
 	Model               string                  `json:"model"`
+	Mode                string                  `json:"mode,omitempty"`
 	Prompt              string                  `json:"prompt"`
 	SystemPrompt        string                  `json:"system_prompt,omitempty"`
 	UserPrompt          string                  `json:"user_prompt,omitempty"`
@@ -120,6 +125,10 @@ type doc2vllmRequestDebug struct {
 	Temperature         float64                 `json:"temperature"`
 	MaxTokens           int                     `json:"max_tokens"`
 	TopP                float64                 `json:"top_p"`
+	RepetitionPenalty   float64                 `json:"repetition_penalty,omitempty"`
+	PresencePenalty     float64                 `json:"presence_penalty,omitempty"`
+	FrequencyPenalty    float64                 `json:"frequency_penalty,omitempty"`
+	ExtraRequestJSON    string                  `json:"extra_request_json,omitempty"`
 	Messages            []doc2vllmMessageDebug  `json:"messages,omitempty"`
 	Attachment          doc2vllmAttachmentDebug `json:"attachment"`
 	Correlation         string                  `json:"correlation_id,omitempty"`
@@ -158,13 +167,13 @@ func (e *doc2vllmCallError) Error() string {
 		lines = append(lines, e.Summary)
 	}
 	if e.Detail != "" {
-		lines = append(lines, "상세: "+e.Detail)
+		lines = append(lines, "?곸꽭: "+e.Detail)
 	}
 	if e.Hint != "" {
-		lines = append(lines, "조치: "+e.Hint)
+		lines = append(lines, "議곗튂: "+e.Hint)
 	}
 	if e.StatusCode > 0 {
-		lines = append(lines, fmt.Sprintf("HTTP 상태: %d", e.StatusCode))
+		lines = append(lines, fmt.Sprintf("HTTP ?곹깭: %d", e.StatusCode))
 	}
 
 	return strings.Join(lines, "\n")
@@ -282,13 +291,18 @@ func buildDoc2VLLMChatRequest(
 	correlationID string,
 ) (doc2vllmChatRequest, doc2vllmRequestDebug, string, error) {
 	rawUserPrompt := strings.TrimSpace(userPrompt)
+	hasAttachment := attachment != nil
+	requestPrompt := rawUserPrompt
 	effectiveUserPrompt := rawUserPrompt
-	if effectiveUserPrompt == "" {
-		effectiveUserPrompt = bot.effectiveOCRInstruction()
+	if hasAttachment {
+		requestPrompt = bot.effectiveDoc2VLLMPrompt(rawUserPrompt)
+		effectiveUserPrompt = bot.effectiveAttachmentUserPrompt(rawUserPrompt)
+	} else if effectiveUserPrompt == "" {
+		effectiveUserPrompt = defaultDoc2VLLMFollowupPrompt
 	}
 
 	messages := make([]doc2vllmMessage, 0, 2)
-	systemPrompt := buildDoc2VLLMSystemPrompt(bot, documentContext, attachment != nil)
+	systemPrompt := buildDoc2VLLMSystemPrompt(bot, documentContext, hasAttachment)
 	if systemPrompt != "" {
 		messages = append(messages, doc2vllmMessage{
 			Role:    "system",
@@ -296,16 +310,16 @@ func buildDoc2VLLMChatRequest(
 		})
 	}
 
-	userContent := []doc2vllmContentPart{{
-		Type: "text",
-		Text: buildDoc2VLLMUserPrompt(rawUserPrompt, effectiveUserPrompt, documentContext, turns, attachment != nil),
-	}}
 	debugAttachment := botAttachment{}
-	userMessage := doc2vllmMessage{
-		Role:    "user",
-		Content: userContent[0].Text,
-	}
-	if attachment != nil {
+	if hasAttachment {
+		userContent := []doc2vllmContentPart{{
+			Type: "text",
+			Text: buildDoc2VLLMUserPrompt(rawUserPrompt, effectiveUserPrompt, true),
+		}}
+		userMessage := doc2vllmMessage{
+			Role:    "user",
+			Content: userContent[0].Text,
+		}
 		dataURL, err := buildDoc2VLLMImageDataURL(*attachment)
 		if err != nil {
 			return doc2vllmChatRequest{}, doc2vllmRequestDebug{}, "", err
@@ -318,65 +332,101 @@ func buildDoc2VLLMChatRequest(
 		})
 		debugAttachment = *attachment
 		userMessage.Content = userContent
+		messages = append(messages, userMessage)
+	} else {
+		messages = append(messages, buildDoc2VLLMConversationMessages(turns)...)
+		messages = append(messages, doc2vllmMessage{
+			Role:    "user",
+			Content: buildDoc2VLLMUserPrompt(rawUserPrompt, effectiveUserPrompt, false),
+		})
 	}
 
 	requestPayload := doc2vllmChatRequest{
 		Model:       defaultIfEmpty(strings.TrimSpace(bot.Model), defaultDoc2VLLMModel),
-		Messages:    append(messages, userMessage),
+		Messages:    messages,
 		Temperature: bot.effectiveDoc2VLLMTemperature(),
 		MaxTokens:   bot.effectiveDoc2VLLMMaxTokens(),
 		TopP:        bot.effectiveDoc2VLLMTopP(),
 	}
 
-	return requestPayload, buildDoc2VLLMRequestDebug(service, requestPayload, debugAttachment, systemPrompt, rawUserPrompt, effectiveUserPrompt, correlationID), effectiveUserPrompt, nil
+	return requestPayload, buildDoc2VLLMRequestDebug(service, bot, requestPayload, debugAttachment, systemPrompt, requestPrompt, rawUserPrompt, effectiveUserPrompt, correlationID), requestPrompt, nil
 }
 
 func buildDoc2VLLMSystemPrompt(bot BotDefinition, documentContext string, hasAttachment bool) string {
-	parts := []string{
-		"You are an OCR document assistant.",
-	}
-	if instruction := strings.TrimSpace(bot.effectiveOCRInstruction()); instruction != "" {
-		parts = append(parts, instruction)
-	}
 	if hasAttachment {
+		assistantRole := "You are an OCR document assistant."
+		if bot.effectiveMode() == "multimodal" {
+			assistantRole = "You are a multimodal document assistant."
+		}
+		parts := []string{
+			assistantRole,
+		}
+		if instruction := strings.TrimSpace(bot.effectiveOCRInstruction()); instruction != "" {
+			parts = append(parts, instruction)
+		}
 		parts = append(parts, "Read the attached document carefully and answer in the same language as the user when possible.")
-	} else if strings.TrimSpace(documentContext) != "" {
-		parts = append(parts, "Use the previously extracted document context as the source of truth for follow-up answers. If the answer is not grounded in the document context, say so clearly.")
-		parts = append(parts, "Answer only the current user request. Do not repeat the full OCR transcript or the full document unless the user explicitly asks for it.")
+		return strings.TrimSpace(strings.Join(parts, "\n\n"))
+	}
+
+	parts := []string{
+		"You are a document question-answering assistant.",
+		"Use the extracted document context below as the source of truth for follow-up answers.",
+		"If the answer is not grounded in the extracted document context, say so clearly.",
+		"Answer only the current request. Do not repeat the full OCR transcript, the entire document, or the full question unless the user explicitly asks for it.",
+	}
+	if source := strings.TrimSpace(documentContext); source != "" {
+		parts = append(parts, "[OCR document source]\n"+source)
 	}
 	return strings.TrimSpace(strings.Join(parts, "\n\n"))
 }
 
-func buildDoc2VLLMUserPrompt(userPrompt, effectiveUserPrompt, documentContext string, turns []conversationTurn, hasAttachment bool) string {
+func buildDoc2VLLMUserPrompt(userPrompt, effectiveUserPrompt string, hasAttachment bool) string {
 	userPrompt = strings.TrimSpace(userPrompt)
 	effectiveUserPrompt = strings.TrimSpace(effectiveUserPrompt)
 	if hasAttachment {
-		if effectiveUserPrompt == "" {
-			return "Process the attached document."
+		if userPrompt != "" {
+			return userPrompt
 		}
-		return effectiveUserPrompt
+		if effectiveUserPrompt != "" {
+			return effectiveUserPrompt
+		}
+		return defaultDoc2VLLMAttachmentUserPrompt
 	}
 
-	parts := make([]string, 0, 4)
-	if strings.TrimSpace(documentContext) != "" {
-		parts = append(parts, "[Document context]\n"+strings.TrimSpace(documentContext))
+	if userPrompt != "" {
+		return userPrompt
 	}
-	if history := buildDoc2VLLMConversationHistory(turns); history != "" {
-		parts = append(parts, "[Conversation history]\n"+history)
+	if effectiveUserPrompt != "" {
+		return effectiveUserPrompt
 	}
-	currentRequest := userPrompt
-	if currentRequest == "" {
-		currentRequest = effectiveUserPrompt
+	return defaultDoc2VLLMFollowupPrompt
+}
+
+func buildDoc2VLLMConversationMessages(turns []conversationTurn) []doc2vllmMessage {
+	normalized := conversationTurnsForFollowup(turns)
+	if len(normalized) == 0 {
+		return nil
 	}
-	parts = append(parts, "[Current user request]\n"+defaultIfEmpty(strings.TrimSpace(currentRequest), "Please answer using the extracted document context."))
-	if !hasAttachment {
-		parts = append(parts, "[Answering rules]\nRespond to the current request only. Do not repeat the full OCR result unless explicitly requested.")
+
+	messages := make([]doc2vllmMessage, 0, len(normalized))
+	for _, turn := range normalized {
+		role := turn.Role
+		switch role {
+		case "assistant", "system":
+		default:
+			role = "user"
+		}
+		messages = append(messages, doc2vllmMessage{
+			Role:    role,
+			Content: turn.Content,
+		})
 	}
-	return strings.TrimSpace(strings.Join(parts, "\n\n"))
+
+	return messages
 }
 
 func buildDoc2VLLMConversationHistory(turns []conversationTurn) string {
-	normalized := normalizeConversationTurns(turns)
+	normalized := conversationTurnsForFollowup(turns)
 	if len(normalized) == 0 {
 		return ""
 	}
@@ -446,9 +496,9 @@ func buildDoc2VLLMImageDataURL(attachment botAttachment) (string, error) {
 	if !strings.HasPrefix(strings.ToLower(mimeType), "image/") {
 		return "", newDoc2VLLMCallError(
 			"unsupported_media_type",
-			"Doc2VLLM OCR은 이미지 첨부만 지원합니다.",
-			fmt.Sprintf("현재 파일 형식: %s", defaultIfEmpty(mimeType, "unknown")),
-			"PNG, JPG, WEBP 같은 이미지 파일을 첨부해 주세요.",
+			"Doc2VLLM OCR currently supports image attachments only.",
+			fmt.Sprintf("Current file type: %s", defaultIfEmpty(mimeType, "unknown")),
+			"Attach an image file such as PNG, JPG, or WEBP.",
 			"",
 			0,
 			false,
@@ -457,9 +507,9 @@ func buildDoc2VLLMImageDataURL(attachment botAttachment) (string, error) {
 	if len(attachment.Content) == 0 {
 		return "", newDoc2VLLMCallError(
 			"empty_attachment",
-			"빈 이미지 파일은 처리할 수 없습니다.",
+			"Empty image attachments cannot be processed.",
 			sanitizeUploadFilename(attachment.Name),
-			"이미지 파일이 정상적으로 업로드되었는지 확인하세요.",
+			"Check that the image file uploaded correctly.",
 			"",
 			0,
 			false,
@@ -470,6 +520,69 @@ func buildDoc2VLLMImageDataURL(attachment botAttachment) (string, error) {
 	return fmt.Sprintf("data:%s;base64,%s", mimeType, encoded), nil
 }
 
+func buildDoc2VLLMRequestBody(requestPayload doc2vllmChatRequest, bot BotDefinition) (map[string]any, error) {
+	body := map[string]any{
+		"model":       requestPayload.Model,
+		"messages":    requestPayload.Messages,
+		"temperature": requestPayload.Temperature,
+		"max_tokens":  requestPayload.MaxTokens,
+		"top_p":       requestPayload.TopP,
+	}
+
+	if bot.PresencePenalty != 0 {
+		body["presence_penalty"] = bot.PresencePenalty
+	}
+	if bot.RepetitionPenalty > 0 && bot.RepetitionPenalty != 1 {
+		body["repetition_penalty"] = bot.RepetitionPenalty
+	}
+	if bot.FrequencyPenalty != 0 {
+		body["frequency_penalty"] = bot.FrequencyPenalty
+	}
+
+	extra, err := parseDoc2VLLMExtraRequestJSON(bot.ExtraRequestJSON)
+	if err != nil {
+		return nil, err
+	}
+	for key, value := range extra {
+		body[key] = value
+	}
+
+	return body, nil
+}
+
+func parseDoc2VLLMExtraRequestJSON(raw string) (map[string]any, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return nil, fmt.Errorf("invalid extra_request_json: %w", err)
+	}
+	if len(payload) == 0 {
+		return nil, nil
+	}
+
+	reservedKeys := map[string]struct{}{
+		"model":              {},
+		"messages":           {},
+		"temperature":        {},
+		"max_tokens":         {},
+		"top_p":              {},
+		"repetition_penalty": {},
+		"presence_penalty":   {},
+		"frequency_penalty":  {},
+	}
+	for key := range payload {
+		if _, reserved := reservedKeys[key]; reserved {
+			return nil, fmt.Errorf("extra_request_json cannot override reserved field %q", key)
+		}
+	}
+
+	return payload, nil
+}
+
 func (p *Plugin) performDoc2VLLMRequest(
 	ctx context.Context,
 	service doc2vllmServiceConfig,
@@ -478,7 +591,12 @@ func (p *Plugin) performDoc2VLLMRequest(
 	requestPayload doc2vllmChatRequest,
 	requestDebug doc2vllmRequestDebug,
 ) (doc2vllmDocumentResult, int, error) {
-	bodyBytes, err := json.Marshal(requestPayload)
+	requestBody, err := buildDoc2VLLMRequestBody(requestPayload, bot)
+	if err != nil {
+		return doc2vllmDocumentResult{}, 0, err
+	}
+
+	bodyBytes, err := json.Marshal(requestBody)
 	if err != nil {
 		return doc2vllmDocumentResult{}, 0, fmt.Errorf("failed to encode Doc2VLLM OCR request: %w", err)
 	}
@@ -507,9 +625,9 @@ func (p *Plugin) performDoc2VLLMRequest(
 	if err != nil {
 		callErr := newDoc2VLLMCallError(
 			"response_read_failed",
-			"Doc2VLLM 응답 본문을 읽는 중 오류가 발생했습니다.",
+			"Doc2VLLM ?묐떟 蹂몃Ц???쎈뒗 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.",
 			err.Error(),
-			"Doc2VLLM 서버 상태와 응답 크기 제한을 확인하세요.",
+			"Doc2VLLM ?쒕쾭 ?곹깭? ?묐떟 ?ш린 ?쒗븳???뺤씤?섏꽭??",
 			service.BaseURL,
 			response.StatusCode,
 			true,
@@ -532,9 +650,9 @@ func (p *Plugin) performDoc2VLLMRequest(
 	if err := json.Unmarshal(responseBody, &parsed); err != nil {
 		callErr := newDoc2VLLMCallError(
 			"decode_failed",
-			"Doc2VLLM 응답 JSON을 해석하지 못했습니다.",
+			"Doc2VLLM ?묐떟 JSON???댁꽍?섏? 紐삵뻽?듬땲??",
 			err.Error(),
-			"Doc2VLLM OpenAI 호환 엔드포인트와 응답 형식을 확인하세요.",
+			"Doc2VLLM OpenAI ?명솚 ?붾뱶?ъ씤?몄? ?묐떟 ?뺤떇???뺤씤?섏꽭??",
 			service.BaseURL,
 			response.StatusCode,
 			false,
@@ -621,7 +739,7 @@ func (p *Plugin) testDoc2VLLMConnection(ctx context.Context, cfg *runtimeConfigu
 			OK:         true,
 			URL:        serviceConfig.BaseURL,
 			StatusCode: response.StatusCode,
-			Message:    "엔드포인트 연결과 인증은 확인되었습니다. 테스트 요청은 OCR 입력 이미지가 없어 예상대로 거부되었습니다.",
+			Message:    "?붾뱶?ъ씤???곌껐怨??몄쬆? ?뺤씤?섏뿀?듬땲?? ?뚯뒪???붿껌? OCR ?낅젰 ?대?吏媛 ?놁뼱 ?덉긽?濡?嫄곕??섏뿀?듬땲??",
 		}, nil
 	}
 	if response.StatusCode >= http.StatusBadRequest {
@@ -632,7 +750,7 @@ func (p *Plugin) testDoc2VLLMConnection(ctx context.Context, cfg *runtimeConfigu
 		OK:         true,
 		URL:        serviceConfig.BaseURL,
 		StatusCode: response.StatusCode,
-		Message:    defaultIfEmpty(strings.TrimSpace(extractTextFromBody(bodyBytes)), "연결에 성공했습니다."),
+		Message:    defaultIfEmpty(strings.TrimSpace(extractTextFromBody(bodyBytes)), "?곌껐???깃났?덉뒿?덈떎."),
 	}, nil
 }
 
@@ -762,9 +880,11 @@ func resolveDoc2VLLMRequestTimeout(value time.Duration) time.Duration {
 
 func buildDoc2VLLMRequestDebug(
 	service doc2vllmServiceConfig,
+	bot BotDefinition,
 	requestPayload doc2vllmChatRequest,
 	attachment botAttachment,
 	systemPrompt string,
+	requestPrompt string,
 	userPrompt string,
 	effectiveUserPrompt string,
 	correlationID string,
@@ -773,13 +893,18 @@ func buildDoc2VLLMRequestDebug(
 		URL:                 strings.TrimSpace(service.BaseURL),
 		AuthMode:            strings.TrimSpace(service.AuthMode),
 		Model:               strings.TrimSpace(requestPayload.Model),
-		Prompt:              truncateString(strings.TrimSpace(effectiveUserPrompt), 2000),
+		Mode:                strings.TrimSpace(bot.effectiveMode()),
+		Prompt:              truncateString(strings.TrimSpace(requestPrompt), 2000),
 		SystemPrompt:        truncateString(strings.TrimSpace(systemPrompt), 2000),
 		UserPrompt:          truncateString(strings.TrimSpace(userPrompt), 2000),
 		EffectiveUserPrompt: truncateString(strings.TrimSpace(effectiveUserPrompt), 2000),
 		Temperature:         requestPayload.Temperature,
 		MaxTokens:           requestPayload.MaxTokens,
 		TopP:                requestPayload.TopP,
+		RepetitionPenalty:   bot.RepetitionPenalty,
+		PresencePenalty:     bot.PresencePenalty,
+		FrequencyPenalty:    bot.FrequencyPenalty,
+		ExtraRequestJSON:    truncateString(strings.TrimSpace(bot.ExtraRequestJSON), 2000),
 		Messages:            buildDoc2VLLMMessageDebugs(requestPayload.Messages),
 		Attachment: doc2vllmAttachmentDebug{
 			Name:      sanitizeUploadFilename(attachment.Name),
@@ -955,9 +1080,9 @@ func classifyDoc2VLLMHTTPError(requestURL string, statusCode int, headers http.H
 	case http.StatusBadRequest:
 		return newDoc2VLLMCallError(
 			"bad_request",
-			"Doc2VLLM OCR 요청이 거부되었습니다.",
-			defaultIfEmpty(bodySummary, "messages 또는 image_url 형식이 Doc2VLLM 요구사항과 맞지 않습니다."),
-			"model, messages, image_url.url, max_tokens 값을 확인하세요.",
+			"Doc2VLLM OCR ?붿껌??嫄곕??섏뿀?듬땲??",
+			defaultIfEmpty(bodySummary, "messages ?먮뒗 image_url ?뺤떇??Doc2VLLM ?붽뎄?ы빆怨?留욎? ?딆뒿?덈떎."),
+			"model, messages, image_url.url, max_tokens 媛믪쓣 ?뺤씤?섏꽭??",
 			requestURL,
 			statusCode,
 			false,
@@ -965,9 +1090,9 @@ func classifyDoc2VLLMHTTPError(requestURL string, statusCode int, headers http.H
 	case http.StatusUnauthorized, http.StatusForbidden:
 		return newDoc2VLLMCallError(
 			"auth_failed",
-			"Doc2VLLM 인증에 실패했습니다.",
-			defaultIfEmpty(bodySummary, "API 키가 유효하지 않거나 권한이 없습니다."),
-			"System Console의 인증 토큰과 헤더 방식을 확인하세요.",
+			"Doc2VLLM authentication failed.",
+			defaultIfEmpty(bodySummary, "The API key is invalid or does not have permission."),
+			"Check the authentication token and header settings in System Console.",
 			requestURL,
 			statusCode,
 			false,
@@ -975,9 +1100,9 @@ func classifyDoc2VLLMHTTPError(requestURL string, statusCode int, headers http.H
 	case http.StatusNotFound:
 		return newDoc2VLLMCallError(
 			"not_found",
-			"Doc2VLLM API 엔드포인트를 찾지 못했습니다.",
-			defaultIfEmpty(bodySummary, "chat/completions 경로가 올바르지 않습니다."),
-			"기본 URL이 OpenAI 호환 chat completions 엔드포인트를 가리키는지 확인하세요.",
+			"Doc2VLLM API ?붾뱶?ъ씤?몃? 李얠? 紐삵뻽?듬땲??",
+			defaultIfEmpty(bodySummary, "chat/completions 寃쎈줈媛 ?щ컮瑜댁? ?딆뒿?덈떎."),
+			"湲곕낯 URL??OpenAI ?명솚 chat completions ?붾뱶?ъ씤?몃? 媛由ы궎?붿? ?뺤씤?섏꽭??",
 			requestURL,
 			statusCode,
 			false,
@@ -985,9 +1110,9 @@ func classifyDoc2VLLMHTTPError(requestURL string, statusCode int, headers http.H
 	case http.StatusTooManyRequests:
 		return newDoc2VLLMCallError(
 			"rate_limited",
-			"Doc2VLLM 호출 한도에 걸렸습니다.",
-			defaultIfEmpty(bodySummary, "잠시 후 다시 시도해야 합니다."),
-			"요청 빈도를 줄이거나 잠시 후 다시 시도하세요.",
+			"Doc2VLLM ?몄텧 ?쒕룄??嫄몃졇?듬땲??",
+			defaultIfEmpty(bodySummary, "?좎떆 ???ㅼ떆 ?쒕룄?댁빞 ?⑸땲??"),
+			"?붿껌 鍮덈룄瑜?以꾩씠嫄곕굹 ?좎떆 ???ㅼ떆 ?쒕룄?섏꽭??",
 			requestURL,
 			statusCode,
 			true,
@@ -995,9 +1120,9 @@ func classifyDoc2VLLMHTTPError(requestURL string, statusCode int, headers http.H
 	case http.StatusRequestEntityTooLarge:
 		return newDoc2VLLMCallError(
 			"image_too_large",
-			"업로드한 이미지가 너무 큽니다.",
-			defaultIfEmpty(bodySummary, "Doc2VLLM이 이미지 크기 제한을 초과한 요청을 거부했습니다."),
-			"이미지 해상도를 낮추거나 더 작은 파일로 다시 시도하세요.",
+			"?낅줈?쒗븳 ?대?吏媛 ?덈Т ?쎈땲??",
+			defaultIfEmpty(bodySummary, "Doc2VLLM???대?吏 ?ш린 ?쒗븳??珥덇낵???붿껌??嫄곕??덉뒿?덈떎."),
+			"?대?吏 ?댁긽?꾨? ??텛嫄곕굹 ???묒? ?뚯씪濡??ㅼ떆 ?쒕룄?섏꽭??",
 			requestURL,
 			statusCode,
 			false,
@@ -1005,9 +1130,9 @@ func classifyDoc2VLLMHTTPError(requestURL string, statusCode int, headers http.H
 	case http.StatusUnsupportedMediaType:
 		return newDoc2VLLMCallError(
 			"unsupported_media_type",
-			"Doc2VLLM OCR은 현재 입력 형식을 지원하지 않습니다.",
-			defaultIfEmpty(bodySummary, "지원되지 않는 입력 형식입니다."),
-			"이미지 파일(PNG, JPG, WEBP 등)을 사용해 주세요.",
+			"Doc2VLLM OCR? ?꾩옱 ?낅젰 ?뺤떇??吏?먰븯吏 ?딆뒿?덈떎.",
+			defaultIfEmpty(bodySummary, "吏?먮릺吏 ?딅뒗 ?낅젰 ?뺤떇?낅땲??"),
+			"?대?吏 ?뚯씪(PNG, JPG, WEBP ?????ъ슜??二쇱꽭??",
 			requestURL,
 			statusCode,
 			false,
@@ -1016,9 +1141,9 @@ func classifyDoc2VLLMHTTPError(requestURL string, statusCode int, headers http.H
 		if statusCode >= http.StatusInternalServerError {
 			return newDoc2VLLMCallError(
 				"server_error",
-				"Doc2VLLM 서버 내부 오류가 발생했습니다.",
-				defaultIfEmpty(bodySummary, "Doc2VLLM 서버가 5xx 오류를 반환했습니다."),
-				"잠시 후 다시 시도하고, 반복되면 Doc2VLLM 서버 로그를 확인하세요.",
+				"Doc2VLLM ?쒕쾭 ?대? ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.",
+				defaultIfEmpty(bodySummary, "Doc2VLLM ?쒕쾭媛 5xx ?ㅻ쪟瑜?諛섑솚?덉뒿?덈떎."),
+				"?좎떆 ???ㅼ떆 ?쒕룄?섍퀬, 諛섎났?섎㈃ Doc2VLLM ?쒕쾭 濡쒓렇瑜??뺤씤?섏꽭??",
 				requestURL,
 				statusCode,
 				true,
@@ -1026,9 +1151,9 @@ func classifyDoc2VLLMHTTPError(requestURL string, statusCode int, headers http.H
 		}
 		return newDoc2VLLMCallError(
 			"unexpected_status",
-			fmt.Sprintf("Doc2VLLM이 예상하지 못한 HTTP 상태 %d 를 반환했습니다.", statusCode),
+			fmt.Sprintf("Doc2VLLM???덉긽?섏? 紐삵븳 HTTP ?곹깭 %d 瑜?諛섑솚?덉뒿?덈떎.", statusCode),
 			bodySummary,
-			"응답 본문과 Doc2VLLM 설정을 함께 확인하세요.",
+			"?묐떟 蹂몃Ц怨?Doc2VLLM ?ㅼ젙???④퍡 ?뺤씤?섏꽭??",
 			requestURL,
 			statusCode,
 			statusCode >= 500,
@@ -1043,9 +1168,9 @@ func classifyDoc2VLLMRequestError(requestURL string, err error) *doc2vllmCallErr
 	if errors.As(err, &timeoutError) && timeoutError.Timeout() {
 		return newDoc2VLLMCallError(
 			"network_timeout",
-			"Doc2VLLM 서버 연결이 시간 초과되었습니다.",
+			"The request to Doc2VLLM timed out.",
 			detail,
-			"Doc2VLLM 서버 상태와 네트워크 지연, 플러그인 타임아웃 설정을 확인하세요.",
+			"Check the Doc2VLLM service status, network route, and plugin timeout settings.",
 			requestURL,
 			0,
 			true,
@@ -1054,9 +1179,9 @@ func classifyDoc2VLLMRequestError(requestURL string, err error) *doc2vllmCallErr
 	if errors.Is(err, context.DeadlineExceeded) {
 		return newDoc2VLLMCallError(
 			"network_timeout",
-			"Doc2VLLM 서버 연결이 시간 초과되었습니다.",
+			"The request to Doc2VLLM timed out.",
 			detail,
-			"Doc2VLLM 서버 상태와 플러그인 타임아웃 값을 확인하세요.",
+			"Check the Doc2VLLM service status and plugin timeout settings.",
 			requestURL,
 			0,
 			true,
@@ -1067,9 +1192,9 @@ func classifyDoc2VLLMRequestError(requestURL string, err error) *doc2vllmCallErr
 	if errors.As(err, &dnsErr) {
 		return newDoc2VLLMCallError(
 			"dns_error",
-			"Doc2VLLM 호스트 이름을 찾지 못했습니다.",
+			"Doc2VLLM ?몄뒪???대쫫??李얠? 紐삵뻽?듬땲??",
 			detail,
-			"기본 URL의 도메인 이름과 DNS 설정을 확인하세요.",
+			"湲곕낯 URL???꾨찓???대쫫怨?DNS ?ㅼ젙???뺤씤?섏꽭??",
 			requestURL,
 			0,
 			false,
@@ -1080,9 +1205,9 @@ func classifyDoc2VLLMRequestError(requestURL string, err error) *doc2vllmCallErr
 	if errors.As(err, &hostnameErr) {
 		return newDoc2VLLMCallError(
 			"tls_hostname_error",
-			"TLS 인증서의 호스트 이름이 Doc2VLLM URL과 일치하지 않습니다.",
+			"TLS ?몄쬆?쒖쓽 ?몄뒪???대쫫??Doc2VLLM URL怨??쇱튂?섏? ?딆뒿?덈떎.",
 			detail,
-			"인증서의 SAN/CN과 기본 URL 호스트가 일치하는지 확인하세요.",
+			"?몄쬆?쒖쓽 SAN/CN怨?湲곕낯 URL ?몄뒪?멸? ?쇱튂?섎뒗吏 ?뺤씤?섏꽭??",
 			requestURL,
 			0,
 			false,
@@ -1093,9 +1218,9 @@ func classifyDoc2VLLMRequestError(requestURL string, err error) *doc2vllmCallErr
 	if errors.As(err, &unknownAuthorityErr) {
 		return newDoc2VLLMCallError(
 			"tls_unknown_authority",
-			"Doc2VLLM TLS 인증서를 신뢰할 수 없습니다.",
+			"Doc2VLLM TLS ?몄쬆?쒕? ?좊ː?????놁뒿?덈떎.",
 			detail,
-			"사설 인증서를 사용 중이면 Mattermost 서버가 해당 루트 인증서를 신뢰하도록 구성하세요.",
+			"?ъ꽕 ?몄쬆?쒕? ?ъ슜 以묒씠硫?Mattermost ?쒕쾭媛 ?대떦 猷⑦듃 ?몄쬆?쒕? ?좊ː?섎룄濡?援ъ꽦?섏꽭??",
 			requestURL,
 			0,
 			false,
@@ -1107,9 +1232,9 @@ func classifyDoc2VLLMRequestError(requestURL string, err error) *doc2vllmCallErr
 	case strings.Contains(lower, "connection refused"):
 		return newDoc2VLLMCallError(
 			"connection_refused",
-			"Doc2VLLM 서버가 연결을 거부했습니다.",
+			"Doc2VLLM ?쒕쾭媛 ?곌껐??嫄곕??덉뒿?덈떎.",
 			detail,
-			"Doc2VLLM API 서버가 실행 중인지, 포트와 방화벽이 올바른지 확인하세요.",
+			"Doc2VLLM API ?쒕쾭媛 ?ㅽ뻾 以묒씤吏, ?ы듃? 諛⑺솕踰쎌씠 ?щ컮瑜몄? ?뺤씤?섏꽭??",
 			requestURL,
 			0,
 			true,
@@ -1117,9 +1242,9 @@ func classifyDoc2VLLMRequestError(requestURL string, err error) *doc2vllmCallErr
 	case strings.Contains(lower, "no such host"):
 		return newDoc2VLLMCallError(
 			"dns_error",
-			"Doc2VLLM 호스트 이름을 찾지 못했습니다.",
+			"Doc2VLLM ?몄뒪???대쫫??李얠? 紐삵뻽?듬땲??",
 			detail,
-			"기본 URL의 도메인 이름과 DNS 설정을 확인하세요.",
+			"湲곕낯 URL???꾨찓???대쫫怨?DNS ?ㅼ젙???뺤씤?섏꽭??",
 			requestURL,
 			0,
 			false,
@@ -1127,9 +1252,9 @@ func classifyDoc2VLLMRequestError(requestURL string, err error) *doc2vllmCallErr
 	case strings.Contains(lower, "certificate"), strings.Contains(lower, "tls"):
 		return newDoc2VLLMCallError(
 			"tls_error",
-			"Doc2VLLM TLS 연결을 설정하지 못했습니다.",
+			"Doc2VLLM TLS ?곌껐???ㅼ젙?섏? 紐삵뻽?듬땲??",
 			detail,
-			"HTTPS 인증서 체인과 프록시 TLS 구성을 확인하세요.",
+			"HTTPS ?몄쬆??泥댁씤怨??꾨줉??TLS 援ъ꽦???뺤씤?섏꽭??",
 			requestURL,
 			0,
 			false,
@@ -1137,9 +1262,9 @@ func classifyDoc2VLLMRequestError(requestURL string, err error) *doc2vllmCallErr
 	default:
 		return newDoc2VLLMCallError(
 			"network_error",
-			"Doc2VLLM 서버에 연결하지 못했습니다.",
+			"Doc2VLLM ?쒕쾭???곌껐?섏? 紐삵뻽?듬땲??",
 			detail,
-			"기본 URL, 네트워크 경로, 방화벽, 프록시 설정을 확인하세요.",
+			"湲곕낯 URL, ?ㅽ듃?뚰겕 寃쎈줈, 諛⑺솕踰? ?꾨줉???ㅼ젙???뺤씤?섏꽭??",
 			requestURL,
 			0,
 			true,
@@ -1155,3 +1280,4 @@ func firstHeaderValue(headers http.Header, keys ...string) string {
 	}
 	return ""
 }
+
