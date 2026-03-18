@@ -461,7 +461,7 @@ function createDefaultConfig(): DraftConfig {
     };
 }
 
-async function loadConfig(
+export async function loadConfig(
     rawValue: unknown,
     last: React.MutableRefObject<string>,
     setConfig: React.Dispatch<React.SetStateAction<DraftConfig>>,
@@ -470,22 +470,28 @@ async function loadConfig(
     setLoadingConfig: React.Dispatch<React.SetStateAction<boolean>>,
     setError: React.Dispatch<React.SetStateAction<string>>,
 ) {
+    const parsed = parseValue(rawValue);
+    // Mattermost feeds the unsaved editor value back through props.value.
+    // Prefer that local draft over the last persisted server config so
+    // in-progress edits and newly added bots are not overwritten.
+    if (parsed.ok) {
+        setError('');
+        setConfig(parsed.config);
+        setSource('config');
+        setSelected((current) => pickBot(parsed.config.bots, current));
+        last.current = parsed.raw;
+        setLoadingConfig(false);
+        return;
+    }
+
     setLoadingConfig(true);
     setError('');
     try {
-        const parsed = parseValue(rawValue);
-        if (parsed.ok && parsed.raw !== last.current) {
-            setConfig(parsed.config);
-            setSource('config');
-            setSelected(parsed.config.bots[0]?.local_id || '');
-            last.current = parsed.raw;
-            return;
-        }
         const response = await getAdminConfig();
         const next = normalizeConfig(response.config);
         setConfig(next);
         setSource(response.source || 'config');
-        setSelected(next.bots[0]?.local_id || '');
+        setSelected((current) => pickBot(next.bots, current));
         last.current = serialize(buildConfig(next));
     } catch (e) {
         setConfig(createDefaultConfig());
