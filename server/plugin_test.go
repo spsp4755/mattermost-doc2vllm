@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"archive/zip"
@@ -118,6 +118,32 @@ func TestConfigurationNormalizeFromConfig(t *testing.T) {
 	require.False(t, runtimeCfg.EnableUsageLogs)
 	require.Len(t, runtimeCfg.BotDefinitions, 1)
 	require.Equal(t, "summary-bot", runtimeCfg.BotDefinitions[0].ID)
+	require.Contains(t, runtimeCfg.AllowHosts, "localhost")
+}
+
+func TestConfigurationNormalizeAutoAllowsConfiguredBotAndRefinerHosts(t *testing.T) {
+	cfg := &configuration{
+		Config: `{
+			"service": {
+				"base_url": "http://localhost:8000/v1"
+			},
+			"bots": [
+				{
+					"username":"ocr-bot",
+					"display_name":"OCR Bot",
+					"base_url":"http://192.168.120.91:8000/v1",
+					"vllm_base_url":"http://192.168.120.92:9000/v1",
+					"vllm_model":"MiniMax-M2.5"
+				}
+			]
+		}`,
+	}
+
+	runtimeCfg, err := cfg.normalize()
+	require.NoError(t, err)
+	require.Contains(t, runtimeCfg.AllowHosts, "localhost")
+	require.Contains(t, runtimeCfg.AllowHosts, "192.168.120.91")
+	require.Contains(t, runtimeCfg.AllowHosts, "192.168.120.92")
 }
 
 func TestNormalizeDoc2VLLMEndpointURL(t *testing.T) {
@@ -591,6 +617,54 @@ func TestServiceConfigForBotPrefersBotOverrides(t *testing.T) {
 	require.Equal(t, "x-api-key", service.AuthMode)
 	require.Equal(t, "override", service.AuthToken)
 	require.Equal(t, 45*time.Second, service.Timeout)
+}
+
+func TestServiceConfigForBotAllowsConfiguredHostWithoutManualAllowHosts(t *testing.T) {
+	cfg := &configuration{
+		Config: `{
+			"service": {
+				"base_url": "http://localhost:8000/v1"
+			},
+			"bots": [
+				{
+					"username":"ocr-bot",
+					"display_name":"OCR Bot",
+					"base_url":"http://192.168.120.91:8000/v1"
+				}
+			]
+		}`,
+	}
+
+	runtimeCfg, err := cfg.normalize()
+	require.NoError(t, err)
+	service, err := runtimeCfg.serviceConfigForBot(runtimeCfg.BotDefinitions[0])
+	require.NoError(t, err)
+	require.Equal(t, "http://192.168.120.91:8000/v1/chat/completions", service.BaseURL)
+}
+
+func TestServiceConfigForVLLMBotAllowsConfiguredHostWithoutManualAllowHosts(t *testing.T) {
+	cfg := &configuration{
+		Config: `{
+			"service": {
+				"base_url": "http://localhost:8000/v1"
+			},
+			"bots": [
+				{
+					"username":"ocr-bot",
+					"display_name":"OCR Bot",
+					"vllm_base_url":"http://192.168.120.92:9000/v1",
+					"vllm_model":"MiniMax-M2.5"
+				}
+			]
+		}`,
+	}
+
+	runtimeCfg, err := cfg.normalize()
+	require.NoError(t, err)
+	service, err := runtimeCfg.serviceConfigForVLLMBot(runtimeCfg.BotDefinitions[0])
+	require.NoError(t, err)
+	require.Equal(t, "http://192.168.120.92:9000/v1/chat/completions", service.BaseURL)
+	require.Equal(t, "MiniMax-M2.5", service.Model)
 }
 
 func TestClassifyDoc2VLLMHTTPErrorUnauthorized(t *testing.T) {

@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/url"
 	"reflect"
 	"strings"
@@ -149,7 +150,7 @@ func (c storedPluginConfig) normalize() (*runtimeConfiguration, error) {
 		return nil, err
 	}
 	cfg.BotDefinitions = bots
-	cfg.AllowHosts = normalizeAllowHosts(c.Service.AllowHosts, cfg.ParsedBaseURL)
+	cfg.AllowHosts = normalizeAllowHosts(c.Service.AllowHosts, cfg.ParsedBaseURL, cfg.BotDefinitions)
 
 	return cfg, nil
 }
@@ -165,13 +166,13 @@ func normalizeAuthMode(value string) string {
 	}
 }
 
-func normalizeAllowHosts(raw string, parsedBaseURL *url.URL) []string {
+func normalizeAllowHosts(raw string, parsedBaseURL *url.URL, bots []BotDefinition) []string {
 	parts := strings.Split(raw, ",")
 	hosts := make([]string, 0, len(parts)+1)
 	seen := map[string]struct{}{}
 
 	appendHost := func(host string) {
-		host = strings.ToLower(strings.TrimSpace(host))
+		host = canonicalAllowHost(host)
 		if host == "" {
 			return
 		}
@@ -186,11 +187,53 @@ func normalizeAllowHosts(raw string, parsedBaseURL *url.URL) []string {
 		appendHost(part)
 	}
 
-	if len(hosts) == 0 && parsedBaseURL != nil {
+	if parsedBaseURL != nil {
 		appendHost(parsedBaseURL.Hostname())
+	}
+	for _, bot := range bots {
+		appendHost(bot.BaseURL)
+		appendHost(bot.VLLMBaseURL)
 	}
 
 	return hosts
+}
+
+func canonicalAllowHost(raw string) string {
+	raw = strings.ToLower(strings.TrimSpace(raw))
+	if raw == "" {
+		return ""
+	}
+	if strings.HasPrefix(raw, "*.") {
+		return raw
+	}
+
+	tryParse := func(value string) string {
+		parsed, err := url.Parse(value)
+		if err != nil {
+			return ""
+		}
+		host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+		if host == "" {
+			return ""
+		}
+		return host
+	}
+
+	if strings.Contains(raw, "://") {
+		if host := tryParse(raw); host != "" {
+			return host
+		}
+	}
+	if strings.Contains(raw, "/") {
+		if host := tryParse("//" + strings.TrimPrefix(raw, "//")); host != "" {
+			return host
+		}
+	}
+	if host, _, err := net.SplitHostPort(raw); err == nil {
+		return strings.ToLower(strings.TrimSpace(host))
+	}
+
+	return strings.Trim(raw, "[]")
 }
 
 func positiveOrDefault(value, fallback int) int {
