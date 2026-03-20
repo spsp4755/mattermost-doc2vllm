@@ -72,6 +72,7 @@ export type PluginStatus = {
     base_url: string;
     bot_count: number;
     allow_hosts: string[];
+    pdf_support: PDFSupportStatus;
     bots: BotDefinition[];
     managed_bots: ManagedBotStatus[];
     bot_sync: BotSyncState;
@@ -129,6 +130,15 @@ export type ConnectionStatus = {
     detail?: string;
     hint?: string;
     retryable?: boolean;
+};
+
+export type PDFSupportStatus = {
+    text_extractor?: string;
+    rasterizer?: string;
+    searchable_pdf: boolean;
+    image_rasterization: boolean;
+    message: string;
+    hint?: string;
 };
 
 export function setSiteURL(value: string) {

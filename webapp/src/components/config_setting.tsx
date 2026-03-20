@@ -94,6 +94,10 @@ const T = {
     configuredBots: '\uc124\uc815\ub41c \ubd07 \uc218',
     managedBots: '\uad00\ub9ac\ub418\ub294 Mattermost \ubd07 \uc0c1\ud0dc',
     noManagedBots: '\uc544\uc9c1 \ub4f1\ub85d\ub41c \ubd07 \uc0c1\ud0dc\uac00 \uc5c6\uc2b5\ub2c8\ub2e4.',
+    pdfSupport: 'PDF 처리 지원 상태',
+    pdfTextExtractor: 'PDF 텍스트 추출기',
+    pdfRasterizer: 'PDF 이미지 변환기',
+    unavailable: '없음',
     preview: '\uc800\uc7a5\ub420 JSON \ubbf8\ub9ac\ubcf4\uae30',
     previewHelp: 'Mattermost \ud50c\ub7ec\uadf8\uc778 \uc124\uc815\uc5d0 \uc800\uc7a5\ub420 JSON \ubbf8\ub9ac\ubcf4\uae30\uc785\ub2c8\ub2e4.',
     requiredGuide: '* \ud45c\uc2dc\ub294 \ud544\uc218 \uc785\ub825 \ud56d\ubaa9\uc785\ub2c8\ub2e4.',
@@ -416,6 +420,13 @@ export default function ConfigSetting(props: Props) {
                         </div>
                         {status?.config_error && <div style={box}>{status.config_error}</div>}
                         {status?.bot_sync?.last_error && <div style={box}>{status.bot_sync.last_error}</div>}
+                        <div style={{...box, display: 'flex', flexDirection: 'column', gap: 6}}>
+                            <strong>{T.pdfSupport}</strong>
+                            <div>{status?.pdf_support?.message || '-'}</div>
+                            <div style={note}>{`${T.pdfTextExtractor}: ${status?.pdf_support?.text_extractor || T.unavailable}`}</div>
+                            <div style={note}>{`${T.pdfRasterizer}: ${status?.pdf_support?.rasterizer || T.unavailable}`}</div>
+                            {status?.pdf_support?.hint && <div style={note}>{status.pdf_support.hint}</div>}
+                        </div>
                         <div style={{...box, display: 'flex', flexDirection: 'column', gap: 8}}>
                             <strong>{T.managedBots}</strong>
                             {managedBots.length === 0 && <div>{T.noManagedBots}</div>}

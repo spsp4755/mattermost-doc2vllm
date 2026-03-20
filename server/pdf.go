@@ -55,6 +55,15 @@ type pdfTextExtraction struct {
 	Processor string
 }
 
+type pdfSupportStatus struct {
+	TextExtractor      string `json:"text_extractor,omitempty"`
+	Rasterizer         string `json:"rasterizer,omitempty"`
+	SearchablePDF      bool   `json:"searchable_pdf"`
+	ImageRasterization bool   `json:"image_rasterization"`
+	Message            string `json:"message,omitempty"`
+	Hint               string `json:"hint,omitempty"`
+}
+
 func (p *Plugin) prepareOCRInputs(ctx context.Context, cfg *runtimeConfiguration, attachments []botAttachment) ([]preparedOCRInput, []documentProcessingFailure) {
 	options := resolvePDFProcessingOptions(cfg)
 	prepared := make([]preparedOCRInput, 0, len(attachments))
@@ -341,6 +350,35 @@ func supportedPDFTextExtractors() []pdfTextExtractor {
 			},
 		},
 	}
+}
+
+func detectPDFSupportStatus() pdfSupportStatus {
+	status := pdfSupportStatus{}
+
+	if extractor, _, err := detectPDFTextExtractor(); err == nil {
+		status.TextExtractor = extractor.Name
+		status.SearchablePDF = true
+	}
+	if rasterizer, _, err := detectPDFRasterizer(); err == nil {
+		status.Rasterizer = rasterizer.Name
+		status.ImageRasterization = true
+	}
+
+	switch {
+	case status.SearchablePDF && status.ImageRasterization:
+		status.Message = "PDF 텍스트 추출과 페이지 이미지 변환을 모두 사용할 수 있습니다."
+	case status.SearchablePDF:
+		status.Message = "검색 가능한 PDF 텍스트 추출은 가능하지만, 스캔 PDF를 이미지로 변환하는 도구는 없습니다."
+		status.Hint = "pdftoppm, mutool, magick 또는 ghostscript(gs/gswin64c)를 Mattermost 플러그인 서버에 설치하면 스캔 PDF도 OCR 할 수 있습니다."
+	case status.ImageRasterization:
+		status.Message = "PDF 페이지 이미지 변환은 가능하지만, 검색 가능한 PDF 텍스트 레이어를 직접 읽는 도구는 없습니다."
+		status.Hint = "pdftotext를 설치하면 텍스트 레이어가 있는 PDF를 더 빠르게 처리할 수 있습니다."
+	default:
+		status.Message = "PDF 처리 도구가 없어 이미지만 바로 OCR 할 수 있습니다."
+		status.Hint = "pdftotext, pdftoppm, mutool, magick 또는 ghostscript(gs/gswin64c) 중 하나 이상을 Mattermost 플러그인 서버에 설치해 주세요."
+	}
+
+	return status
 }
 
 func detectPDFRasterizer() (pdfRasterizer, string, error) {

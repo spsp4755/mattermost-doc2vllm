@@ -25,6 +25,7 @@ type pluginStatusResponse struct {
 	BaseURL     string                    `json:"base_url"`
 	BotCount    int                       `json:"bot_count"`
 	AllowHosts  []string                  `json:"allow_hosts"`
+	PDFSupport  pdfSupportStatus          `json:"pdf_support"`
 	Bots        []BotDefinition           `json:"bots"`
 	ManagedBots []botSyncEntry            `json:"managed_bots"`
 	BotSync     botSyncState              `json:"bot_sync"`
@@ -71,6 +72,7 @@ func (p *Plugin) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	status := pluginStatusResponse{
 		PluginID:    manifest.Id,
 		BaseURL:     defaultDoc2VLLMEndpointURL,
+		PDFSupport:  detectPDFSupportStatus(),
 		Bots:        []BotDefinition{},
 		ManagedBots: []botSyncEntry{},
 		BotSync:     p.getBotSyncState(),

@@ -146,6 +146,26 @@ func TestConfigurationNormalizeAutoAllowsConfiguredBotAndRefinerHosts(t *testing
 	require.Contains(t, runtimeCfg.AllowHosts, "192.168.120.92")
 }
 
+func TestDetectAttachmentExtensionFallsBackToFileName(t *testing.T) {
+	info := &model.FileInfo{
+		Name:      "contract.docx",
+		Extension: "",
+	}
+
+	require.Equal(t, "docx", detectAttachmentExtension(info))
+}
+
+func TestDetectAttachmentMIMETypeUsesFileNameWhenStoredMimeIsGeneric(t *testing.T) {
+	info := &model.FileInfo{
+		Name:      "contract.docx",
+		Extension: "",
+		MimeType:  "application/octet-stream",
+	}
+
+	mimeType := detectAttachmentMIMEType(info, []byte("PK\x03\x04"))
+	require.Equal(t, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", mimeType)
+}
+
 func TestLoadLatestConfigurationWithReplacesCachedPrompt(t *testing.T) {
 	plugin := &Plugin{}
 	plugin.setConfiguration(&configuration{
