@@ -2,13 +2,13 @@ import type {Dispatch, SetStateAction} from 'react';
 
 import type {AdminPluginConfig} from '../client';
 import {getAdminConfig} from '../client';
-import {loadConfig} from './config_setting';
+import {buildConfig, loadConfig, normalizeConfig} from './config_setting';
 
 jest.mock('manifest', () => ({
     __esModule: true,
     default: {
         id: 'com.mattermost.doc2vllm-ocr-test',
-        version: '0.1.6',
+        version: '0.1.7',
     },
 }), {virtual: true});
 
@@ -124,5 +124,28 @@ describe('loadConfig', () => {
         expect(setters.setSource).toHaveBeenCalledWith('server');
         expect(setters.setLoadingConfig).toHaveBeenNthCalledWith(1, true);
         expect(setters.setLoadingConfig).toHaveBeenLastCalledWith(false);
+    });
+
+    test('preserves blank bot fields instead of auto-filling them again', () => {
+        const config = normalizeConfig({
+            ...draftConfig,
+            service: {
+                ...draftConfig.service,
+                base_url: '',
+            },
+            bots: [{
+                ...draftConfig.bots[0],
+                username: '',
+                display_name: '',
+                model: '',
+            }],
+        });
+
+        const built = buildConfig(config);
+
+        expect(built.service.base_url).toBe('');
+        expect(built.bots[0].username).toBe('');
+        expect(built.bots[0].display_name).toBe('');
+        expect(built.bots[0].model).toBe('');
     });
 });

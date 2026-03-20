@@ -99,6 +99,8 @@ The plugin stores its current configuration in the `Config` JSON field.
 - The plugin limits PDF processing using `pdf_raster_dpi` and `max_pdf_pages` to avoid expensive conversions on very large documents.
 - Legacy `.doc`, `.xls`, `.ppt` and other non-OOXML office formats are not directly supported yet.
 - If `vllm_base_url` and `vllm_model` are configured on a bot, the plugin can run an extra post-processing step after OCR.
+- The plugin now auto-allows the hosts used by the configured global `base_url`, per-bot `base_url`, and `vllm_base_url`. In normal use, admins do not need to manage `allow_hosts` manually.
+- When uploading a custom plugin bundle, Mattermost can log `No signature when persisting plugin to filestore. Persisting plugin to filestore.` This is expected for unsigned custom builds and is not, by itself, the reason a plugin fails to activate.
 
 ## Development
 

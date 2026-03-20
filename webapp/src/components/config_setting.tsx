@@ -28,7 +28,7 @@ const codeStyle: React.CSSProperties = {margin: 0, fontSize: 12, lineHeight: 1.5
 const T = {
     title: '\uad00\ub9ac\uc790 \uc124\uc815',
     intro: '\ud55c\uad6d\uc5b4 \ud658\uacbd\uc5d0\uc11c \ubc14\ub85c \uc4f8 \uc218 \uc788\ub3c4\ub85d OCR/\uba40\ud2f0\ubaa8\ub2ec \uc124\uc815 \ud654\uba74\uc744 \uc815\ub9ac\ud588\uc2b5\ub2c8\ub2e4.',
-    botTip1: '\uc0c8 \ubd07\uc744 \ucd94\uac00\ud558\uba74 \uae30\ubcf8 username\uacfc \ud45c\uc2dc \uc774\ub984\uc774 \uc790\ub3d9\uc73c\ub85c \ucc44\uc6cc\uc838 \ubc14\ub85c \uc800\uc7a5\ud560 \uc218 \uc788\uc2b5\ub2c8\ub2e4.',
+    botTip1: '\uc0c8 \ubd07\uc744 \ucd94\uac00\ud558\uba74 \ube48 \uc785\ub825 \uc0c1\ud0dc\ub85c \uc2dc\uc791\ud558\ubbc0\ub85c \ud544\uc694\ud55c \uac12\ub9cc \uc9c1\uc811 \uc785\ub825\ud558\uba74 \ub429\ub2c8\ub2e4.',
     botTip2: '\uc22b\uc790 \ud30c\ub77c\ubbf8\ud130\ub294 \ubaa8\ub450 \uc9c1\uc811 \uc785\ub825\ud558\ub294 \ud615\ud0dc\ub85c \uc720\uc9c0\ud588\uc2b5\ub2c8\ub2e4.',
     botTip3: '\uc124\uc815 \uc800\uc7a5 \ud6c4 \uc0c1\ud0dc \uc0c8\ub85c\uace0\uce68\uc744 \ub204\ub974\uba74 Mattermost \ubd07 \uacc4\uc815 \ub4f1\ub85d \uc5ec\ubd80\ub97c \ud655\uc778\ud560 \uc218 \uc788\uc2b5\ub2c8\ub2e4.',
     source: '\ubd88\ub7ec\uc628 \uc124\uc815 \ucd9c\ucc98',
@@ -51,7 +51,7 @@ const T = {
     bots: '\ubd07 \uce74\ud0c8\ub85c\uadf8',
     loadSamples: '\uc608\uc2dc \ubd88\ub7ec\uc624\uae30',
     addBot: '\uc0c8 \ubd07 \ucd94\uac00',
-    addHint: '\ubd07\uc744 \ucd94\uac00\ud558\uba74 \uc720\ud6a8\ud55c \uae30\ubcf8\uac12\uc73c\ub85c \uc0dd\uc131\ub418\ubbc0\ub85c \uc800\uc7a5 \uc9c1\ud6c4\ubd80\ud130 \ubd07 \ub4f1\ub85d\uc774 \uac00\ub2a5\ud574\uc57c \ud569\ub2c8\ub2e4.',
+    addHint: '\uc0c8 \ubd07\uc740 \ube48 \ucd08\uae30\uc785\ub825\uc73c\ub85c \ucd94\uac00\ub429\ub2c8\ub2e4. * \ud45c\uc2dc \ud56d\ubaa9\uc740 \ud544\uc218\ub85c \ucc44\uc6cc \uc8fc\uc138\uc694.',
     noBots: '\uc544\uc9c1 \ub4f1\ub85d\ub41c \ubd07\uc774 \uc5c6\uc2b5\ub2c8\ub2e4.',
     selectBot: '\uc67c\ucabd\uc5d0\uc11c \ubd07\uc744 \uc120\ud0dd\ud558\uc138\uc694.',
     duplicate: '\ubcf5\uc81c',
@@ -96,6 +96,10 @@ const T = {
     noManagedBots: '\uc544\uc9c1 \ub4f1\ub85d\ub41c \ubd07 \uc0c1\ud0dc\uac00 \uc5c6\uc2b5\ub2c8\ub2e4.',
     preview: '\uc800\uc7a5\ub420 JSON \ubbf8\ub9ac\ubcf4\uae30',
     previewHelp: 'Mattermost \ud50c\ub7ec\uadf8\uc778 \uc124\uc815\uc5d0 \uc800\uc7a5\ub420 JSON \ubbf8\ub9ac\ubcf4\uae30\uc785\ub2c8\ub2e4.',
+    requiredGuide: '* \ud45c\uc2dc\ub294 \ud544\uc218 \uc785\ub825 \ud56d\ubaa9\uc785\ub2c8\ub2e4.',
+    usernameHelp: '\ubd07 \ud638\ucd9c\uc6a9 username\uc785\ub2c8\ub2e4. \uacf5\ubc31\uc740 -\ub85c \ubcc0\ud658\ub429\ub2c8\ub2e4.',
+    displayNameHelp: '\ube44\uc6cc \ub450\uba74 Mattermost\uc5d0\uc11c \uae30\ubcf8 \ud45c\uc2dc \uaddc\uce59\uc744 \ub530\ub985\ub2c8\ub2e4.',
+    modelHelp: '\ube44\uc6cc \ub450\uba74 \ud50c\ub7ec\uadf8\uc778 \uae30\ubcf8 \ubaa8\ub378(doc2vllm-ocr)\uc744 \uc0ac\uc6a9\ud569\ub2c8\ub2e4.',
 };
 
 type DraftBot = {
@@ -145,7 +149,7 @@ type Props = {
     setSaveNeeded?: () => void;
 };
 
-type FieldProps = {label: string; help?: string; children: React.ReactNode};
+type FieldProps = {label: string; help?: string; required?: boolean; children: React.ReactNode};
 
 const sampleBots: Partial<BotDefinition>[] = [
     {id: 'doc2vllm-ocr', username: 'doc2vllm-ocr', display_name: '\ubb38\uc11c OCR \uae30\ubcf8', description: '\uc77c\ubc18 \ubb38\uc11c\uc5d0 \uc801\ud569\ud55c OCR \ubd07', model: defaultModel, mode: 'ocr', output_mode: 'markdown', ocr_prompt: '\ucca8\ubd80\ub41c \ubb38\uc11c\uc758 \ud14d\uc2a4\ud2b8\ub97c \uc6d0\ubb38\uc5d0 \ucda9\uc2e4\ud558\uac8c \ucd94\ucd9c\ud558\uc138\uc694.', temperature: 0, max_tokens: 2048, top_p: 1, repetition_penalty: 1, mask_sensitive_data: false},
@@ -253,6 +257,7 @@ export default function ConfigSetting(props: Props) {
                 {props.helpText}
                 {error && <div style={box}>{error}</div>}
                 {messages.length > 0 && <div style={box}>{messages.map((message) => <div key={message}>{message}</div>)}</div>}
+                <span style={note}>{T.requiredGuide}</span>
             </section>
 
             <section style={card}>
@@ -260,7 +265,7 @@ export default function ConfigSetting(props: Props) {
                 {loadingConfig ? <span>{T.loadingConfig}</span> : (
                     <>
                         <div style={row2}>
-                            <Field label={T.baseUrl}><input disabled={disabled} style={field} value={config.service.base_url} placeholder={defaultURL} onChange={(e) => updateService({base_url: e.target.value})}/></Field>
+                            <Field label={T.baseUrl} required={true}><input disabled={disabled} style={field} value={config.service.base_url} placeholder={defaultURL} onChange={(e) => updateService({base_url: e.target.value})}/></Field>
                             <Field label={T.authMode}>
                                 <select disabled={disabled} style={field} value={config.service.auth_mode} onChange={(e) => updateService({auth_mode: auth(e.target.value)})}>
                                     <option value='bearer'>{'Authorization: Bearer'}</option>
@@ -320,13 +325,13 @@ export default function ConfigSetting(props: Props) {
                                     </div>
                                 </div>
                                 <div style={row2}>
-                                    <Field label={T.username}><input disabled={disabled} style={field} value={bot.username} onChange={(e) => updateUsername(bot, e.target.value)}/></Field>
-                                    <Field label={T.displayName}><input disabled={disabled} style={field} value={bot.display_name} onChange={(e) => updateBot(bot.local_id, {display_name: e.target.value})}/></Field>
+                                    <Field label={T.username} required={true} help={T.usernameHelp}><input disabled={disabled} style={field} value={bot.username} placeholder={'doc2vllm-bot'} onChange={(e) => updateUsername(bot, e.target.value)}/></Field>
+                                    <Field label={T.displayName} help={T.displayNameHelp}><input disabled={disabled} style={field} value={bot.display_name} placeholder={'OCR Bot'} onChange={(e) => updateBot(bot.local_id, {display_name: e.target.value})}/></Field>
                                 </div>
                                 <Field label={T.description}><textarea disabled={disabled} style={{...field, minHeight: 72}} value={bot.description} onChange={(e) => updateBot(bot.local_id, {description: e.target.value})}/></Field>
                                 <div style={box}><strong>{T.internalId}</strong><div style={{marginTop: 6, fontFamily: 'monospace'}}>{bot.bot_id}</div><div style={note}>{T.internalIdHelp}</div></div>
                                 <div style={row3}>
-                                    <Field label={T.model}><input disabled={disabled} style={field} value={bot.model} onChange={(e) => updateBot(bot.local_id, {model: e.target.value})}/></Field>
+                                    <Field label={T.model} help={T.modelHelp}><input disabled={disabled} style={field} value={bot.model} placeholder={defaultModel} onChange={(e) => updateBot(bot.local_id, {model: e.target.value})}/></Field>
                                     <Field label={T.mode}>
                                         <select disabled={disabled} style={field} value={bot.mode} onChange={(e) => updateBot(bot.local_id, {mode: normalizeMode(e.target.value)})}>
                                             <option value='ocr'>{T.ocrMode}</option>
@@ -434,7 +439,7 @@ export default function ConfigSetting(props: Props) {
 function Field(props: FieldProps) {
     return (
         <label style={{display: 'flex', flexDirection: 'column', gap: 6}}>
-            <strong style={{fontSize: 13}}>{props.label}</strong>
+            <strong style={{fontSize: 13}}>{props.required ? `${props.label} *` : props.label}</strong>
             {props.children}
             {props.help && <span style={note}>{props.help}</span>}
         </label>
@@ -455,7 +460,7 @@ function ManagedBotRow(props: {item: ManagedBotStatus}) {
 
 function createDefaultConfig(): DraftConfig {
     return {
-        service: {base_url: defaultURL, auth_mode: 'bearer', auth_token: '', allow_hosts: 'localhost'},
+        service: {base_url: defaultURL, auth_mode: 'bearer', auth_token: '', allow_hosts: ''},
         runtime: {default_timeout_seconds: 30, max_input_length: 4000, max_output_length: 8000, pdf_raster_dpi: 200, max_pdf_pages: 20, mask_sensitive_data: false, enable_debug_logs: false, enable_usage_logs: true},
         bots: [],
     };
@@ -529,20 +534,25 @@ function parseValue(value: unknown): {ok: boolean; config: DraftConfig; raw: str
     }
 }
 
-function normalizeConfig(value?: AdminPluginConfig): DraftConfig {
+export function normalizeConfig(value?: AdminPluginConfig): DraftConfig {
     const next = createDefaultConfig();
     if (!value) {
         return next;
     }
-    next.service = {base_url: text(value.service?.base_url) || defaultURL, auth_mode: auth(text(value.service?.auth_mode)), auth_token: text(value.service?.auth_token), allow_hosts: text(value.service?.allow_hosts) || 'localhost'};
+    next.service = {
+        base_url: value.service?.base_url == null ? defaultURL : text(value.service?.base_url),
+        auth_mode: auth(text(value.service?.auth_mode)),
+        auth_token: text(value.service?.auth_token),
+        allow_hosts: value.service?.allow_hosts == null ? '' : text(value.service?.allow_hosts),
+    };
     next.runtime = {default_timeout_seconds: num(value.runtime?.default_timeout_seconds, 30), max_input_length: num(value.runtime?.max_input_length, 4000), max_output_length: num(value.runtime?.max_output_length, 8000), pdf_raster_dpi: num(value.runtime?.pdf_raster_dpi, 200), max_pdf_pages: num(value.runtime?.max_pdf_pages, 20), mask_sensitive_data: Boolean(value.runtime?.mask_sensitive_data), enable_debug_logs: Boolean(value.runtime?.enable_debug_logs), enable_usage_logs: value.runtime?.enable_usage_logs !== false};
     next.bots = Array.isArray(value.bots) ? value.bots.map((item, index) => normalizeBot(item, index, next.runtime.mask_sensitive_data)) : [];
     return next;
 }
 
-function buildConfig(config: DraftConfig): AdminPluginConfig {
+export function buildConfig(config: DraftConfig): AdminPluginConfig {
     return {
-        service: {base_url: text(config.service.base_url) || defaultURL, auth_mode: auth(config.service.auth_mode), auth_token: text(config.service.auth_token), allow_hosts: text(config.service.allow_hosts)},
+        service: {base_url: text(config.service.base_url), auth_mode: auth(config.service.auth_mode), auth_token: text(config.service.auth_token), allow_hosts: text(config.service.allow_hosts)},
         runtime: {default_timeout_seconds: num(config.runtime.default_timeout_seconds, 30), max_input_length: num(config.runtime.max_input_length, 4000), max_output_length: num(config.runtime.max_output_length, 8000), pdf_raster_dpi: num(config.runtime.pdf_raster_dpi, 200), max_pdf_pages: num(config.runtime.max_pdf_pages, 20), mask_sensitive_data: Boolean(config.runtime.mask_sensitive_data), enable_debug_logs: Boolean(config.runtime.enable_debug_logs), enable_usage_logs: Boolean(config.runtime.enable_usage_logs)},
         bots: config.bots.map((item) => ({
             id: idValue(item.bot_id || item.username, item.local_id),
@@ -552,7 +562,7 @@ function buildConfig(config: DraftConfig): AdminPluginConfig {
             base_url: text(item.base_url),
             auth_mode: botAuth(item.auth_mode),
             auth_token: text(item.auth_token),
-            model: text(item.model) || defaultModel,
+            model: text(item.model),
             mode: normalizeMode(item.mode),
             output_mode: text(item.output_mode) || 'markdown',
             ocr_prompt: text(item.ocr_prompt),
@@ -578,9 +588,8 @@ function buildConfig(config: DraftConfig): AdminPluginConfig {
 
 function normalizeBot(item: Partial<BotDefinition>, index: number, defaultMaskSensitiveData: boolean): DraftBot {
     const local = text(item.id) || id(`bot-${index}`);
-    const fallback = nextBotIdentity([], index + 1);
-    const username = user(text(item.username)) || fallback.username;
-    return {local_id: local, bot_id: idValue(text(item.id) || username, local), username, display_name: text(item.display_name) || `Bot ${index + 1}`, description: text(item.description), base_url: text(item.base_url), auth_mode: botAuth(text(item.auth_mode)), auth_token: text(item.auth_token), model: text(item.model) || defaultModel, mode: normalizeMode(item.mode), output_mode: text(item.output_mode) || 'markdown', ocr_prompt: text(item.ocr_prompt), temperature: numRange(item.temperature, 0, 0, 2), max_tokens: num(item.max_tokens, 1024), top_p: numRange(item.top_p, 1, 0.1, 1), repetition_penalty: numRange(item.repetition_penalty, 1, 0.1, 2), presence_penalty: numRange(item.presence_penalty, 0, -2, 2), frequency_penalty: numRange(item.frequency_penalty, 0, -2, 2), extra_request_json: text(item.extra_request_json), mask_sensitive_data: typeof item.mask_sensitive_data === 'boolean' ? item.mask_sensitive_data : defaultMaskSensitiveData, vllm_base_url: text(item.vllm_base_url), vllm_api_key: text(item.vllm_api_key), vllm_model: text(item.vllm_model), vllm_prompt: text(item.vllm_prompt), vllm_scope: botScope(item.vllm_scope), allowed_teams: Array.isArray(item.allowed_teams) ? split(item.allowed_teams.join(','), true) : [], allowed_channels: Array.isArray(item.allowed_channels) ? split(item.allowed_channels.join(','), true) : [], allowed_users: Array.isArray(item.allowed_users) ? split(item.allowed_users.join(','), true) : []};
+    const username = user(text(item.username));
+    return {local_id: local, bot_id: idValue(text(item.id) || username, local), username, display_name: text(item.display_name), description: text(item.description), base_url: text(item.base_url), auth_mode: botAuth(text(item.auth_mode)), auth_token: text(item.auth_token), model: text(item.model), mode: normalizeMode(item.mode), output_mode: text(item.output_mode) || 'markdown', ocr_prompt: text(item.ocr_prompt), temperature: numRange(item.temperature, 0, 0, 2), max_tokens: num(item.max_tokens, 1024), top_p: numRange(item.top_p, 1, 0.1, 1), repetition_penalty: numRange(item.repetition_penalty, 1, 0.1, 2), presence_penalty: numRange(item.presence_penalty, 0, -2, 2), frequency_penalty: numRange(item.frequency_penalty, 0, -2, 2), extra_request_json: text(item.extra_request_json), mask_sensitive_data: typeof item.mask_sensitive_data === 'boolean' ? item.mask_sensitive_data : defaultMaskSensitiveData, vllm_base_url: text(item.vllm_base_url), vllm_api_key: text(item.vllm_api_key), vllm_model: text(item.vllm_model), vllm_prompt: text(item.vllm_prompt), vllm_scope: botScope(item.vllm_scope), allowed_teams: Array.isArray(item.allowed_teams) ? split(item.allowed_teams.join(','), true) : [], allowed_channels: Array.isArray(item.allowed_channels) ? split(item.allowed_channels.join(','), true) : [], allowed_users: Array.isArray(item.allowed_users) ? split(item.allowed_users.join(','), true) : []};
 }
 
 function validate(config: DraftConfig): string[] {
@@ -595,9 +604,9 @@ function validate(config: DraftConfig): string[] {
     for (const bot of config.bots) {
         const label = bot.display_name || bot.username || bot.bot_id;
         if (!text(bot.username)) {
-            items.push(`${label}: username is required.`);
+            items.push(`${label}: username은 필수 입력입니다.`);
         } else if (usernames.has(bot.username)) {
-            items.push(`${label}: duplicate username.`);
+            items.push(`${label}: username이 중복되었습니다.`);
         } else {
             usernames.add(bot.username);
         }
@@ -605,10 +614,10 @@ function validate(config: DraftConfig): string[] {
             try {
                 const parsed = JSON.parse(bot.extra_request_json) as unknown;
                 if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-                    items.push(`${label}: extra_request_json must be a JSON object.`);
+                    items.push(`${label}: extra_request_json은 JSON 객체여야 합니다.`);
                 }
             } catch (e) {
-                items.push(`${label}: JSON error - ${(e as Error).message}`);
+                items.push(`${label}: JSON 오류 - ${(e as Error).message}`);
             }
         }
     }
@@ -632,7 +641,7 @@ function renderConnectionStatus(status: ConnectionStatus): string {
 function emptyBot(existingBots: DraftBot[], defaultMaskSensitiveData: boolean): DraftBot {
     const identity = nextBotIdentity(existingBots);
     const local = id('bot');
-    return {local_id: local, bot_id: identity.id, username: identity.username, display_name: identity.display_name, description: '\uc0c8\ub85c \ucd94\uac00\ud55c OCR \ubd07', base_url: '', auth_mode: '', auth_token: '', model: defaultModel, mode: 'ocr', output_mode: 'markdown', ocr_prompt: '\ucca8\ubd80\ub41c \ubb38\uc11c\uc758 \ud14d\uc2a4\ud2b8\ub97c \uc6d0\ubb38\uc5d0 \ucda9\uc2e4\ud558\uac8c \ucd94\ucd9c\ud558\uc138\uc694.', temperature: 0, max_tokens: 2048, top_p: 1, repetition_penalty: 1, presence_penalty: 0, frequency_penalty: 0, extra_request_json: '', mask_sensitive_data: defaultMaskSensitiveData, vllm_base_url: '', vllm_api_key: '', vllm_model: '', vllm_prompt: '', vllm_scope: 'postprocess', allowed_teams: [], allowed_channels: [], allowed_users: []};
+    return {local_id: local, bot_id: identity.id, username: '', display_name: '', description: '', base_url: '', auth_mode: '', auth_token: '', model: '', mode: 'ocr', output_mode: 'markdown', ocr_prompt: '', temperature: 0, max_tokens: 2048, top_p: 1, repetition_penalty: 1, presence_penalty: 0, frequency_penalty: 0, extra_request_json: '', mask_sensitive_data: defaultMaskSensitiveData, vllm_base_url: '', vllm_api_key: '', vllm_model: '', vllm_prompt: '', vllm_scope: 'postprocess', allowed_teams: [], allowed_channels: [], allowed_users: []};
 }
 
 function nextBotIdentity(existingBots: DraftBot[], start = 1): {id: string; username: string; display_name: string} {
