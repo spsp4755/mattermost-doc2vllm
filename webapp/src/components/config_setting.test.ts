@@ -2,7 +2,7 @@ import type {Dispatch, SetStateAction} from 'react';
 
 import type {AdminPluginConfig} from '../client';
 import {getAdminConfig} from '../client';
-import {buildConfig, loadConfig, normalizeConfig} from './config_setting';
+import {buildConfig, draftUsername, loadConfig, normalizeConfig} from './config_setting';
 
 jest.mock('manifest', () => ({
     __esModule: true,
@@ -147,5 +147,19 @@ describe('loadConfig', () => {
         expect(built.bots[0].username).toBe('');
         expect(built.bots[0].display_name).toBe('');
         expect(built.bots[0].model).toBe('');
+    });
+
+    test('keeps hyphens while editing the username draft', () => {
+        expect(draftUsername('qwen-test-ocr')).toBe('qwen-test-ocr');
+        expect(draftUsername('qwen-')).toBe('qwen-');
+    });
+
+    test('normalizes trailing hyphens only when building the saved config', () => {
+        const config = normalizeConfig(draftConfig);
+        config.bots[0].username = 'qwen-';
+
+        const built = buildConfig(config);
+
+        expect(built.bots[0].username).toBe('qwen');
     });
 });

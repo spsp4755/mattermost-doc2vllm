@@ -216,7 +216,7 @@ export default function ConfigSetting(props: Props) {
     };
     const removeBot = (botId: string) => apply({...config, bots: config.bots.filter((item) => item.local_id !== botId)});
     const updateUsername = (current: DraftBot, rawValue: string) => {
-        const nextUsername = user(rawValue);
+        const nextUsername = draftUsername(rawValue);
         updateBot(current.local_id, {username: nextUsername, bot_id: idValue(nextUsername || current.bot_id, current.local_id)});
     };
     const refreshStatus = async () => {
@@ -745,6 +745,10 @@ function normalizeMode(value: unknown): string {
 
 function user(value: unknown): string {
     return String(value || '').trim().toLowerCase().replace(/^@+/, '').replace(/[^a-z0-9-_]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+}
+
+export function draftUsername(value: unknown): string {
+    return String(value || '').toLowerCase().replace(/^@+/, '').replace(/[^a-z0-9-_]/g, '-').replace(/-+/g, '-');
 }
 
 function idValue(value: unknown, fallback: string): string {
