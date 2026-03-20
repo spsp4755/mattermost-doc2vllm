@@ -304,7 +304,7 @@ func hostAllowed(host string, allowHosts []string) bool {
 	return false
 }
 
-func (p *Plugin) getConfiguration() *configuration {
+func (p *Plugin) getCachedConfiguration() *configuration {
 	p.configurationLock.RLock()
 	defer p.configurationLock.RUnlock()
 
@@ -312,7 +312,39 @@ func (p *Plugin) getConfiguration() *configuration {
 		return &configuration{}
 	}
 
-	return p.configuration
+	return p.configuration.Clone()
+}
+
+func (p *Plugin) loadLatestConfigurationWith(loader func(*configuration) error) (*configuration, error) {
+	if loader == nil {
+		return p.getCachedConfiguration(), nil
+	}
+
+	latest := new(configuration)
+	if err := loader(latest); err != nil {
+		return nil, fmt.Errorf("failed to load plugin configuration: %w", err)
+	}
+
+	current := p.getCachedConfiguration()
+	if current.Config != latest.Config {
+		p.setConfiguration(latest)
+		return latest.Clone(), nil
+	}
+
+	return current, nil
+}
+
+func (p *Plugin) getConfiguration() *configuration {
+	if p != nil && p.API != nil {
+		latest, err := p.loadLatestConfigurationWith(func(configuration *configuration) error {
+			return p.API.LoadPluginConfiguration(configuration)
+		})
+		if err == nil {
+			return latest
+		}
+	}
+
+	return p.getCachedConfiguration()
 }
 
 func (p *Plugin) getRuntimeConfiguration() (*runtimeConfiguration, error) {

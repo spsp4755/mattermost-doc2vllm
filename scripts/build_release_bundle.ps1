@@ -22,6 +22,7 @@ Add-ToolPath (Join-Path $workspaceRoot 'tools\node')
 
 $env:GOCACHE = Join-Path $repoRoot '.gocache'
 $env:GOMODCACHE = Join-Path $repoRoot '.gomodcache'
+$env:GOPATH = Join-Path $repoRoot '.gopath'
 
 Push-Location $repoRoot
 

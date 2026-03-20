@@ -146,6 +146,37 @@ func TestConfigurationNormalizeAutoAllowsConfiguredBotAndRefinerHosts(t *testing
 	require.Contains(t, runtimeCfg.AllowHosts, "192.168.120.92")
 }
 
+func TestLoadLatestConfigurationWithReplacesCachedPrompt(t *testing.T) {
+	plugin := &Plugin{}
+	plugin.setConfiguration(&configuration{
+		Config: `{
+			"bots": [
+				{"username":"ocr-bot","display_name":"OCR Bot","ocr_prompt":"old prompt"}
+			]
+		}`,
+	})
+
+	latest, err := plugin.loadLatestConfigurationWith(func(cfg *configuration) error {
+		cfg.Config = `{
+			"bots": [
+				{"username":"ocr-bot","display_name":"OCR Bot","ocr_prompt":"new prompt"}
+			]
+		}`
+		return nil
+	})
+	require.NoError(t, err)
+
+	runtimeCfg, err := latest.normalize()
+	require.NoError(t, err)
+	require.Len(t, runtimeCfg.BotDefinitions, 1)
+	require.Equal(t, "new prompt", runtimeCfg.BotDefinitions[0].OCRPrompt)
+
+	cachedRuntimeCfg, err := plugin.getCachedConfiguration().normalize()
+	require.NoError(t, err)
+	require.Len(t, cachedRuntimeCfg.BotDefinitions, 1)
+	require.Equal(t, "new prompt", cachedRuntimeCfg.BotDefinitions[0].OCRPrompt)
+}
+
 func TestNormalizeDoc2VLLMEndpointURL(t *testing.T) {
 	testCases := []struct {
 		name     string
