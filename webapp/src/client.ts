@@ -126,6 +126,11 @@ export type ConnectionStatus = {
     url: string;
     status_code: number;
     message: string;
+    bot_id?: string;
+    bot_name?: string;
+    model?: string;
+    mode?: string;
+    auth_mode?: string;
     error_code?: string;
     detail?: string;
     hint?: string;
@@ -175,8 +180,14 @@ export async function getAdminConfig() {
     return request<AdminConfigResponse>('/config');
 }
 
-export async function testConnection() {
-    return request<ConnectionStatus>('/test', {method: 'POST'});
+export async function testConnection(botId?: string, config?: AdminPluginConfig) {
+    return request<ConnectionStatus>('/test', {
+        method: 'POST',
+        body: JSON.stringify({
+            bot_id: botId,
+            config,
+        }),
+    });
 }
 
 export async function getBots(channelId?: string) {

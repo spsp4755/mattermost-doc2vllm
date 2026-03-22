@@ -1,5 +1,5 @@
 import manifest from 'manifest';
-import React, {useEffect, useMemo, useRef, useState} from 'react';
+import React, {useDeferredValue, useEffect, useMemo, useRef, useState} from 'react';
 
 import type {
     AdminPluginConfig,
@@ -36,9 +36,11 @@ const T = {
     service: '\uc11c\ube44\uc2a4 \uc5f0\uacb0',
     loadingConfig: '\uc124\uc815\uc744 \ubd88\ub7ec\uc624\ub294 \uc911\uc785\ub2c8\ub2e4...',
     baseUrl: '\uae30\ubcf8 URL',
+    baseUrlHelp: '\ub8e8\ud2b8 URL, /v1, /v1/chat/completions \uc911 \uc5b4\ub290 \ud615\ud0dc\ub85c \uc785\ub825\ud574\ub3c4 \uc790\ub3d9 \uc815\uaddc\ud654\ub429\ub2c8\ub2e4.',
     authMode: '\uc778\uc99d \ubc29\uc2dd',
     apiKey: '\uae30\ubcf8 API \ud0a4',
     allowHosts: '\ud5c8\uc6a9 \ud638\uc2a4\ud2b8',
+    allowHostsHelp: '\ube44\uc6cc\ub450\uba74 \uae30\ubcf8 URL, \ubd07 \uc804\uc6a9 URL, \ud6c4\ucc98\ub9ac URL\uc758 \ud638\uc2a4\ud2b8\uac00 \uc790\ub3d9\uc73c\ub85c \ud5c8\uc6a9\ub429\ub2c8\ub2e4.',
     timeout: '\ud0c0\uc784\uc544\uc6c3(\ucd08)',
     maxInput: '\ucd5c\ub300 \uc785\ub825 \uae38\uc774',
     maxOutput: '\ucd5c\ub300 \ucd9c\ub825 \uae38\uc774',
@@ -69,12 +71,14 @@ const T = {
     systemPrompt: '\ucca8\ubd80 \ud30c\uc77c\uc6a9 System Prompt',
     extraJson: '\ucd94\uac00 \uc694\uccad \ud30c\ub77c\ubbf8\ud130(JSON)',
     botBaseUrl: '\ubd07 \uc804\uc6a9 URL',
+    botBaseUrlHelp: '\ube44\uc6cc\ub450\uba74 \uae30\ubcf8 URL\uc744 \uadf8\ub300\ub85c \uc0ac\uc6a9\ud569\ub2c8\ub2e4.',
     botApiKey: '\ubd07 \uc804\uc6a9 API \ud0a4',
     botAuthMode: '\ubd07 \uc804\uc6a9 \uc778\uc99d \ubc29\uc2dd',
     useGlobal: '\uae30\ubcf8\uac12 \uc0ac\uc6a9',
     maskBot: '\uc774 \ubd07\uc5d0 \ubbfc\uac10\uc815\ubcf4 \ub9c8\uc2a4\ud0b9 \uc801\uc6a9',
     refiner: '\ub300\ud615 \ubaa8\ub378 \ud6c4\ucc98\ub9ac / QA \ubcf4\uac15',
     refinerUrl: '\ud6c4\ucc98\ub9ac URL',
+    refinerUrlHelp: 'URL\uacfc \ubaa8\ub378\uba85\uc744 \ud568\uaed8 \uc785\ub825\ud558\uba74 \ud6c4\ucc98\ub9ac \ub2e8\uacc4\ub97c \ud65c\uc131\ud654\ud569\ub2c8\ub2e4.',
     refinerKey: '\ud6c4\ucc98\ub9ac API \ud0a4',
     refinerModel: '\ud6c4\ucc98\ub9ac \ubaa8\ub378',
     refinerScope: '\uc801\uc6a9 \ubc94\uc704',
@@ -85,10 +89,18 @@ const T = {
     allowedTeams: '\ud5c8\uc6a9 \ud300',
     allowedChannels: '\ud5c8\uc6a9 \ucc44\ub110',
     allowedUsers: '\ud5c8\uc6a9 \uc0ac\uc6a9\uc790',
+    effectiveSettings: '\ud604\uc7ac \ubd07\uc758 \uc2e4\uc81c \uc801\uc6a9\uac12',
+    effectiveUrl: '\uc2e4\uc81c \uc694\uccad URL',
+    effectiveAuth: '\uc2e4\uc81c \uc778\uc99d \ubc29\uc2dd',
+    effectiveModel: '\uc2e4\uc81c \ubaa8\ub378\uba85',
+    effectiveRefiner: '\ud6c4\ucc98\ub9ac \uc0ac\uc6a9',
+    inactive: '\uc0ac\uc6a9 \uc548 \ud568',
+    validationTitle: '\uc800\uc7a5 \uc804 \ud655\uc778\ud560 \ud56d\ubaa9',
     status: '\uc5f0\uacb0 \ubc0f \ubd07 \ub3d9\uae30\ud654 \uc0c1\ud0dc',
     refreshStatus: '\uc0c1\ud0dc \uc0c8\ub85c\uace0\uce68',
     loadingStatus: '\uc0c1\ud0dc \ud655\uc778 \uc911...',
-    testConnection: '\uc5f0\uacb0 \ud14c\uc2a4\ud2b8',
+    testConnection: '\uc120\ud0dd\ud55c \ubd07 \uc5f0\uacb0 \ud14c\uc2a4\ud2b8',
+    testConnectionHelp: '\ud604\uc7ac \ud3b8\uc9d1 \uc911\uc778 \uac12 \uae30\uc900\uc73c\ub85c, \uc9c0\uae08 \uc120\ud0dd\ud55c \ubd07\uc758 URL\u00b7\uc778\uc99d\u00b7\ubaa8\ub378 \uc870\ud569\uc744 \ubc14\ub85c \ud655\uc778\ud569\ub2c8\ub2e4.',
     testing: '\uc5f0\uacb0 \ud655\uc778 \uc911...',
     pluginId: '\ud50c\ub7ec\uadf8\uc778 ID',
     configuredBots: '\uc124\uc815\ub41c \ubd07 \uc218',
@@ -100,6 +112,8 @@ const T = {
     unavailable: '없음',
     preview: '\uc800\uc7a5\ub420 JSON \ubbf8\ub9ac\ubcf4\uae30',
     previewHelp: 'Mattermost \ud50c\ub7ec\uadf8\uc778 \uc124\uc815\uc5d0 \uc800\uc7a5\ub420 JSON \ubbf8\ub9ac\ubcf4\uae30\uc785\ub2c8\ub2e4.',
+    showPreview: '\ubbf8\ub9ac\ubcf4\uae30 \uc5f4\uae30',
+    hidePreview: '\ubbf8\ub9ac\ubcf4\uae30 \uc811\uae30',
     requiredGuide: '* \ud45c\uc2dc\ub294 \ud544\uc218 \uc785\ub825 \ud56d\ubaa9\uc785\ub2c8\ub2e4.',
     usernameHelp: '\ubd07 \ud638\ucd9c\uc6a9 username\uc785\ub2c8\ub2e4. \uacf5\ubc31\uc740 -\ub85c \ubcc0\ud658\ub429\ub2c8\ub2e4.',
     displayNameHelp: '\ube44\uc6cc \ub450\uba74 Mattermost\uc5d0\uc11c \uae30\ubcf8 \ud45c\uc2dc \uaddc\uce59\uc744 \ub530\ub985\ub2c8\ub2e4.',
@@ -166,6 +180,7 @@ export default function ConfigSetting(props: Props) {
     const disabled = Boolean(props.disabled || props.setByEnv);
     const [config, setConfig] = useState<DraftConfig>(createDefaultConfig());
     const [selected, setSelected] = useState('');
+    const [showPreview, setShowPreview] = useState(false);
     const [status, setStatus] = useState<PluginStatus | null>(null);
     const [connection, setConnection] = useState<ConnectionStatus | null>(null);
     const [connectionError, setConnectionError] = useState('');
@@ -175,6 +190,8 @@ export default function ConfigSetting(props: Props) {
     const [loadingStatus, setLoadingStatus] = useState(true);
     const [testing, setTesting] = useState(false);
     const last = useRef('');
+    const saveTimer = useRef<number | null>(null);
+    const deferredConfig = useDeferredValue(config);
 
     useEffect(() => {
         void loadConfig(props.value, last, setConfig, setSource, setSelected, setLoadingConfig, setError);
@@ -184,17 +201,31 @@ export default function ConfigSetting(props: Props) {
         void loadStatus(setStatus, setLoadingStatus, setError);
     }, []);
 
+    useEffect(() => {
+        return () => {
+            if (saveTimer.current != null) {
+                window.clearTimeout(saveTimer.current);
+            }
+        };
+    }, []);
+
     const bot = useMemo(() => config.bots.find((item) => item.local_id === selected) || config.bots[0] || null, [config.bots, selected]);
-    const messages = useMemo(() => validate(config), [config]);
-    const preview = useMemo(() => serialize(buildConfig(config)), [config]);
+    const messages = useMemo(() => validate(deferredConfig), [deferredConfig]);
+    const preview = useMemo(() => showPreview ? serialize(buildConfig(deferredConfig)) : '', [deferredConfig, showPreview]);
     const managedBots = status?.managed_bots || status?.bot_sync?.entries || [];
 
     const apply = (next: DraftConfig, nextSelected?: string) => {
         setConfig(next);
         const raw = serialize(buildConfig(next));
         last.current = raw;
-        props.onChange(key, raw);
-        props.setSaveNeeded?.();
+        if (saveTimer.current != null) {
+            window.clearTimeout(saveTimer.current);
+        }
+        saveTimer.current = window.setTimeout(() => {
+            props.onChange(key, raw);
+            props.setSaveNeeded?.();
+            saveTimer.current = null;
+        }, 100);
         setSelected(nextSelected || pickBot(next.bots, selected));
     };
 
@@ -235,7 +266,7 @@ export default function ConfigSetting(props: Props) {
         setConnection(null);
         setConnectionError('');
         try {
-            setConnection(await testConnection());
+            setConnection(await testConnection(bot?.bot_id || bot?.username || undefined, buildConfig(config)));
         } catch (e) {
             setConnectionError((e as Error).message);
         } finally {
@@ -260,7 +291,12 @@ export default function ConfigSetting(props: Props) {
                 {props.setByEnv && <div style={box}>{T.readonly}</div>}
                 {props.helpText}
                 {error && <div style={box}>{error}</div>}
-                {messages.length > 0 && <div style={box}>{messages.map((message) => <div key={message}>{message}</div>)}</div>}
+                {messages.length > 0 && (
+                    <div style={box}>
+                        <strong>{T.validationTitle}</strong>
+                        {messages.map((message) => <div key={message}>{message}</div>)}
+                    </div>
+                )}
                 <span style={note}>{T.requiredGuide}</span>
             </section>
 
@@ -269,7 +305,7 @@ export default function ConfigSetting(props: Props) {
                 {loadingConfig ? <span>{T.loadingConfig}</span> : (
                     <>
                         <div style={row2}>
-                            <Field label={T.baseUrl} required={true}><input disabled={disabled} style={field} value={config.service.base_url} placeholder={defaultURL} onChange={(e) => updateService({base_url: e.target.value})}/></Field>
+                            <Field label={T.baseUrl} required={true} help={T.baseUrlHelp}><input disabled={disabled} style={field} value={config.service.base_url} placeholder={defaultURL} onChange={(e) => updateService({base_url: e.target.value})}/></Field>
                             <Field label={T.authMode}>
                                 <select disabled={disabled} style={field} value={config.service.auth_mode} onChange={(e) => updateService({auth_mode: auth(e.target.value)})}>
                                     <option value='bearer'>{'Authorization: Bearer'}</option>
@@ -279,7 +315,7 @@ export default function ConfigSetting(props: Props) {
                         </div>
                         <div style={row2}>
                             <Field label={T.apiKey}><input disabled={disabled} type='password' style={field} value={config.service.auth_token} onChange={(e) => updateService({auth_token: e.target.value})}/></Field>
-                            <Field label={T.allowHosts}><input disabled={disabled} style={field} value={config.service.allow_hosts} placeholder={'localhost, *.internal.example.com'} onChange={(e) => updateService({allow_hosts: e.target.value})}/></Field>
+                            <Field label={T.allowHosts} help={T.allowHostsHelp}><input disabled={disabled} style={field} value={config.service.allow_hosts} placeholder={'localhost, *.internal.example.com'} onChange={(e) => updateService({allow_hosts: e.target.value})}/></Field>
                         </div>
                         <div style={row3}>
                             <Field label={T.timeout} help={T.directInput}><input disabled={disabled} type='number' min={1} style={field} value={String(config.runtime.default_timeout_seconds)} onChange={(e) => updateRuntime({default_timeout_seconds: num(e.target.value, 30)})}/></Field>
@@ -334,6 +370,13 @@ export default function ConfigSetting(props: Props) {
                                 </div>
                                 <Field label={T.description}><textarea disabled={disabled} style={{...field, minHeight: 72}} value={bot.description} onChange={(e) => updateBot(bot.local_id, {description: e.target.value})}/></Field>
                                 <div style={box}><strong>{T.internalId}</strong><div style={{marginTop: 6, fontFamily: 'monospace'}}>{bot.bot_id}</div><div style={note}>{T.internalIdHelp}</div></div>
+                                <div style={{...box, display: 'flex', flexDirection: 'column', gap: 6}}>
+                                    <strong>{T.effectiveSettings}</strong>
+                                    <div style={note}>{`${T.effectiveUrl}: ${effectiveBotBaseURL(config, bot)}`}</div>
+                                    <div style={note}>{`${T.effectiveAuth}: ${effectiveBotAuthMode(config, bot)}`}</div>
+                                    <div style={note}>{`${T.effectiveModel}: ${effectiveBotModel(bot)}`}</div>
+                                    <div style={note}>{`${T.effectiveRefiner}: ${effectiveBotRefiner(bot)}`}</div>
+                                </div>
                                 <div style={row3}>
                                     <Field label={T.model} help={T.modelHelp}><input disabled={disabled} style={field} value={bot.model} placeholder={defaultModel} onChange={(e) => updateBot(bot.local_id, {model: e.target.value})}/></Field>
                                     <Field label={T.mode}>
@@ -363,7 +406,7 @@ export default function ConfigSetting(props: Props) {
                                 </div>
                                 <Field label={T.extraJson}><textarea disabled={disabled} style={{...field, minHeight: 96}} value={bot.extra_request_json} placeholder={'{"seed":7,"top_k":20}'} onChange={(e) => updateBot(bot.local_id, {extra_request_json: e.target.value})}/></Field>
                                 <div style={row2}>
-                                    <Field label={T.botBaseUrl}><input disabled={disabled} style={field} value={bot.base_url} onChange={(e) => updateBot(bot.local_id, {base_url: e.target.value})}/></Field>
+                                    <Field label={T.botBaseUrl} help={T.botBaseUrlHelp}><input disabled={disabled} style={field} value={bot.base_url} onChange={(e) => updateBot(bot.local_id, {base_url: e.target.value})}/></Field>
                                     <Field label={T.botApiKey}><input disabled={disabled} type='password' style={field} value={bot.auth_token} onChange={(e) => updateBot(bot.local_id, {auth_token: e.target.value})}/></Field>
                                 </div>
                                 <Field label={T.botAuthMode}>
@@ -377,7 +420,7 @@ export default function ConfigSetting(props: Props) {
                                 <div style={{...box, display: 'flex', flexDirection: 'column', gap: 8}}>
                                     <strong>{T.refiner}</strong>
                                     <div style={row2}>
-                                        <Field label={T.refinerUrl}><input disabled={disabled} style={field} value={bot.vllm_base_url} onChange={(e) => updateBot(bot.local_id, {vllm_base_url: e.target.value})}/></Field>
+                                        <Field label={T.refinerUrl} help={T.refinerUrlHelp}><input disabled={disabled} style={field} value={bot.vllm_base_url} onChange={(e) => updateBot(bot.local_id, {vllm_base_url: e.target.value})}/></Field>
                                         <Field label={T.refinerKey}><input disabled={disabled} type='password' style={field} value={bot.vllm_api_key} onChange={(e) => updateBot(bot.local_id, {vllm_api_key: e.target.value})}/></Field>
                                     </div>
                                     <div style={row2}>
@@ -411,6 +454,7 @@ export default function ConfigSetting(props: Props) {
                         <button className='btn btn-primary' disabled={disabled || testing} type='button' onClick={runConnectionTest}>{testing ? T.testing : T.testConnection}</button>
                     </div>
                 </div>
+                <span style={note}>{T.testConnectionHelp}</span>
                 {loadingStatus ? <span>{T.loadingStatus}</span> : (
                     <>
                         <div style={row3}>
@@ -439,9 +483,14 @@ export default function ConfigSetting(props: Props) {
             </section>
 
             <section style={card}>
-                <strong>{T.preview}</strong>
+                <div style={{display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center'}}>
+                    <strong>{T.preview}</strong>
+                    <button className='btn btn-tertiary' type='button' onClick={() => setShowPreview((open) => !open)}>
+                        {showPreview ? T.hidePreview : T.showPreview}
+                    </button>
+                </div>
                 <span style={note}>{T.previewHelp}</span>
-                <pre style={codeStyle}>{preview}</pre>
+                {showPreview && <pre style={codeStyle}>{preview}</pre>}
             </section>
         </div>
     );
@@ -463,7 +512,7 @@ function ManagedBotRow(props: {item: ManagedBotStatus}) {
         <div style={{background: 'rgba(var(--center-channel-color-rgb),.03)', borderRadius: 8, padding: 12, border: '1px solid rgba(var(--center-channel-color-rgb),.08)'}}>
             <strong>{item.display_name || item.username}</strong>
             <div>{`@${item.username}`}</div>
-            <div style={note}>{`model=${item.model || '-'} | registered=${item.registered ? 'yes' : 'no'} | active=${item.active ? 'yes' : 'no'}`}</div>
+            <div style={note}>{`모델=${item.model || '-'} | 등록=${item.registered ? '완료' : '미완료'} | 활성화=${item.active ? '예' : '아니오'}`}</div>
             {item.status_message && <div style={note}>{item.status_message}</div>}
         </div>
     );
@@ -603,9 +652,29 @@ function normalizeBot(item: Partial<BotDefinition>, index: number, defaultMaskSe
     return {local_id: local, bot_id: idValue(text(item.id) || username, local), username, display_name: text(item.display_name), description: text(item.description), base_url: text(item.base_url), auth_mode: botAuth(text(item.auth_mode)), auth_token: text(item.auth_token), model: text(item.model), mode: normalizeMode(item.mode), output_mode: text(item.output_mode) || 'markdown', ocr_prompt: text(item.ocr_prompt), temperature: numRange(item.temperature, 0, 0, 2), max_tokens: num(item.max_tokens, 1024), top_p: numRange(item.top_p, 1, 0.1, 1), repetition_penalty: numRange(item.repetition_penalty, 1, 0.1, 2), presence_penalty: numRange(item.presence_penalty, 0, -2, 2), frequency_penalty: numRange(item.frequency_penalty, 0, -2, 2), extra_request_json: text(item.extra_request_json), mask_sensitive_data: typeof item.mask_sensitive_data === 'boolean' ? item.mask_sensitive_data : defaultMaskSensitiveData, vllm_base_url: text(item.vllm_base_url), vllm_api_key: text(item.vllm_api_key), vllm_model: text(item.vllm_model), vllm_prompt: text(item.vllm_prompt), vllm_scope: botScope(item.vllm_scope), allowed_teams: Array.isArray(item.allowed_teams) ? split(item.allowed_teams.join(','), true) : [], allowed_channels: Array.isArray(item.allowed_channels) ? split(item.allowed_channels.join(','), true) : [], allowed_users: Array.isArray(item.allowed_users) ? split(item.allowed_users.join(','), true) : []};
 }
 
+function effectiveBotBaseURL(config: DraftConfig, bot: DraftBot): string {
+    return text(bot.base_url) || text(config.service.base_url) || defaultURL;
+}
+
+function effectiveBotAuthMode(config: DraftConfig, bot: DraftBot): string {
+    return botAuth(bot.auth_mode) || auth(config.service.auth_mode) || 'bearer';
+}
+
+function effectiveBotModel(bot: DraftBot): string {
+    return text(bot.model) || defaultModel;
+}
+
+function effectiveBotRefiner(bot: DraftBot): string {
+    if (!text(bot.vllm_base_url) || !text(bot.vllm_model)) {
+        return T.inactive;
+    }
+    return `${text(bot.vllm_model)} (${botScope(bot.vllm_scope)})`;
+}
+
 function validate(config: DraftConfig): string[] {
     const items: string[] = [];
     const usernames = new Set<string>();
+    const reservedRequestKeys = new Set(['model', 'messages', 'temperature', 'max_tokens', 'top_p', 'repetition_penalty', 'presence_penalty', 'frequency_penalty']);
     if (!text(config.service.base_url)) {
         items.push('\uae30\ubcf8 URL\uc740 \ud544\uc218\uc785\ub2c8\ub2e4.');
     }
@@ -621,11 +690,23 @@ function validate(config: DraftConfig): string[] {
         } else {
             usernames.add(bot.username);
         }
+        if (text(bot.vllm_base_url) && !text(bot.vllm_model)) {
+            items.push(`${label}: 후처리 URL을 입력했다면 후처리 모델명도 함께 입력해 주세요.`);
+        }
+        if (!text(bot.vllm_base_url) && text(bot.vllm_model)) {
+            items.push(`${label}: 후처리 모델명을 입력했다면 후처리 URL도 함께 입력해 주세요.`);
+        }
         if (text(bot.extra_request_json)) {
             try {
                 const parsed = JSON.parse(bot.extra_request_json) as unknown;
                 if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
                     items.push(`${label}: extra_request_json은 JSON 객체여야 합니다.`);
+                } else {
+                    for (const key of Object.keys(parsed as Record<string, unknown>)) {
+                        if (reservedRequestKeys.has(key)) {
+                            items.push(`${label}: extra_request_json에서는 ${key} 필드를 덮어쓸 수 없습니다.`);
+                        }
+                    }
                 }
             } catch (e) {
                 items.push(`${label}: JSON 오류 - ${(e as Error).message}`);
@@ -637,6 +718,18 @@ function validate(config: DraftConfig): string[] {
 
 function renderConnectionStatus(status: ConnectionStatus): string {
     const lines = [status.ok ? '\uc5f0\uacb0 \uc131\uacf5' : '\uc5f0\uacb0 \uc2e4\ud328', `URL: ${status.url}`, `HTTP: ${status.status_code}`, `Message: ${status.message}`];
+    if (status.bot_name || status.bot_id) {
+        lines.push(`Bot: ${status.bot_name || status.bot_id}`);
+    }
+    if (status.model) {
+        lines.push(`Model: ${status.model}`);
+    }
+    if (status.mode) {
+        lines.push(`Mode: ${status.mode}`);
+    }
+    if (status.auth_mode) {
+        lines.push(`Auth: ${status.auth_mode}`);
+    }
     if (status.error_code) {
         lines.push(`Code: ${status.error_code}`);
     }

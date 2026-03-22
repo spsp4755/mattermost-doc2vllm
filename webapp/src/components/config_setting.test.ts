@@ -8,7 +8,7 @@ jest.mock('manifest', () => ({
     __esModule: true,
     default: {
         id: 'com.mattermost.doc2vllm-ocr-test',
-        version: '0.1.7',
+        version: '0.1.11',
     },
 }), {virtual: true});
 

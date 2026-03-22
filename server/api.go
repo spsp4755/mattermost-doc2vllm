@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 
@@ -18,6 +19,11 @@ type runBotAPIRequest struct {
 	Prompt    string         `json:"prompt"`
 	Inputs    map[string]any `json:"inputs"`
 	FileIDs   []string       `json:"file_ids,omitempty"`
+}
+
+type testConnectionAPIRequest struct {
+	BotID  string              `json:"bot_id"`
+	Config *storedPluginConfig `json:"config,omitempty"`
 }
 
 type pluginStatusResponse struct {
@@ -201,15 +207,31 @@ func (p *Plugin) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg, err := p.getRuntimeConfiguration()
+	var request testConnectionAPIRequest
+	if r.Body != nil {
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil && !errors.Is(err, io.EOF) {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+	}
+
+	var (
+		cfg *runtimeConfiguration
+		err error
+	)
+	if request.Config != nil {
+		cfg, err = request.Config.normalize()
+	} else {
+		cfg, err = p.getRuntimeConfiguration()
+	}
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 
-	status, err := p.testDoc2VLLMConnection(r.Context(), cfg)
+	status, err := p.testDoc2VLLMConnection(r.Context(), cfg, request.BotID)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, err)
+		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 

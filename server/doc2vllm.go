@@ -37,6 +37,11 @@ type doc2vllmConnectionStatus struct {
 	URL        string `json:"url"`
 	StatusCode int    `json:"status_code"`
 	Message    string `json:"message"`
+	BotID      string `json:"bot_id,omitempty"`
+	BotName    string `json:"bot_name,omitempty"`
+	Model      string `json:"model,omitempty"`
+	Mode       string `json:"mode,omitempty"`
+	AuthMode   string `json:"auth_mode,omitempty"`
 	ErrorCode  string `json:"error_code,omitempty"`
 	Detail     string `json:"detail,omitempty"`
 	Hint       string `json:"hint,omitempty"`
@@ -167,13 +172,13 @@ func (e *doc2vllmCallError) Error() string {
 		lines = append(lines, e.Summary)
 	}
 	if e.Detail != "" {
-		lines = append(lines, "?곸꽭: "+e.Detail)
+		lines = append(lines, "Detail: "+e.Detail)
 	}
 	if e.Hint != "" {
-		lines = append(lines, "議곗튂: "+e.Hint)
+		lines = append(lines, "Hint: "+e.Hint)
 	}
 	if e.StatusCode > 0 {
-		lines = append(lines, fmt.Sprintf("HTTP ?곹깭: %d", e.StatusCode))
+		lines = append(lines, fmt.Sprintf("HTTP Status: %d", e.StatusCode))
 	}
 
 	return strings.Join(lines, "\n")
@@ -696,14 +701,28 @@ func (c doc2vllmChoice) Text() string {
 	return ""
 }
 
-func (p *Plugin) testDoc2VLLMConnection(ctx context.Context, cfg *runtimeConfiguration) (*doc2vllmConnectionStatus, error) {
-	serviceConfig, err := cfg.serviceConfigForBot(BotDefinition{})
+func (p *Plugin) testDoc2VLLMConnection(ctx context.Context, cfg *runtimeConfiguration, botID string) (*doc2vllmConnectionStatus, error) {
+	testBot := BotDefinition{}
+	if strings.TrimSpace(botID) != "" {
+		selectedBot := cfg.getBotByID(botID)
+		if selectedBot == nil {
+			return nil, fmt.Errorf("bot %q was not found in the current configuration", strings.TrimSpace(botID))
+		}
+		testBot = *selectedBot
+	}
+
+	serviceConfig, err := cfg.serviceConfigForBot(testBot)
 	if err != nil {
 		return nil, err
 	}
 
+	model := defaultDoc2VLLMModel
+	if strings.TrimSpace(testBot.Model) != "" {
+		model = strings.TrimSpace(testBot.Model)
+	}
+
 	requestPayload := doc2vllmChatRequest{
-		Model: defaultDoc2VLLMModel,
+		Model: model,
 		Messages: []doc2vllmMessage{{
 			Role:    "user",
 			Content: defaultDoc2VLLMOCRPrompt,
@@ -739,18 +758,34 @@ func (p *Plugin) testDoc2VLLMConnection(ctx context.Context, cfg *runtimeConfigu
 			OK:         true,
 			URL:        serviceConfig.BaseURL,
 			StatusCode: response.StatusCode,
-			Message:    "?붾뱶?ъ씤???곌껐怨??몄쬆? ?뺤씤?섏뿀?듬땲?? ?뚯뒪???붿껌? OCR ?낅젰 ?대?吏媛 ?놁뼱 ?덉긽?濡?嫄곕??섏뿀?듬땲??",
+			BotID:      strings.TrimSpace(testBot.ID),
+			BotName:    defaultIfEmpty(strings.TrimSpace(testBot.DisplayName), strings.TrimSpace(testBot.Username)),
+			Model:      model,
+			Mode:       testBot.effectiveMode(),
+			AuthMode:   serviceConfig.AuthMode,
+			Message:    "Connection to the endpoint succeeded. The probe request was rejected only because it did not include a real OCR attachment.",
 		}, nil
 	}
 	if response.StatusCode >= http.StatusBadRequest {
-		return classifyDoc2VLLMHTTPError(serviceConfig.BaseURL, response.StatusCode, response.Header, bodyBytes).toConnectionStatus(), nil
+		status := classifyDoc2VLLMHTTPError(serviceConfig.BaseURL, response.StatusCode, response.Header, bodyBytes).toConnectionStatus()
+		status.BotID = strings.TrimSpace(testBot.ID)
+		status.BotName = defaultIfEmpty(strings.TrimSpace(testBot.DisplayName), strings.TrimSpace(testBot.Username))
+		status.Model = model
+		status.Mode = testBot.effectiveMode()
+		status.AuthMode = serviceConfig.AuthMode
+		return status, nil
 	}
 
 	return &doc2vllmConnectionStatus{
 		OK:         true,
 		URL:        serviceConfig.BaseURL,
 		StatusCode: response.StatusCode,
-		Message:    defaultIfEmpty(strings.TrimSpace(extractTextFromBody(bodyBytes)), "?곌껐???깃났?덉뒿?덈떎."),
+		BotID:      strings.TrimSpace(testBot.ID),
+		BotName:    defaultIfEmpty(strings.TrimSpace(testBot.DisplayName), strings.TrimSpace(testBot.Username)),
+		Model:      model,
+		Mode:       testBot.effectiveMode(),
+		AuthMode:   serviceConfig.AuthMode,
+		Message:    defaultIfEmpty(strings.TrimSpace(extractTextFromBody(bodyBytes)), "Connection succeeded."),
 	}, nil
 }
 

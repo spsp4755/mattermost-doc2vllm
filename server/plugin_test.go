@@ -4,6 +4,9 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -716,6 +719,57 @@ func TestServiceConfigForVLLMBotAllowsConfiguredHostWithoutManualAllowHosts(t *t
 	require.NoError(t, err)
 	require.Equal(t, "http://192.168.120.92:9000/v1/chat/completions", service.BaseURL)
 	require.Equal(t, "MiniMax-M2.5", service.Model)
+}
+
+func TestTestDoc2VLLMConnectionUsesSelectedBotOverrides(t *testing.T) {
+	var (
+		authHeader string
+		bodyBytes  []byte
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeader = r.Header.Get("x-api-key")
+		bodyBytes, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"missing image input"}}`))
+	}))
+	defer server.Close()
+
+	parsedURL, err := url.Parse(server.URL)
+	require.NoError(t, err)
+
+	bot, err := (BotDefinition{
+		ID:          "qwen-test-ocr",
+		Username:    "qwen-test-ocr",
+		DisplayName: "Qwen Test OCR",
+		BaseURL:     server.URL,
+		AuthMode:    "x-api-key",
+		AuthToken:   "bot-secret",
+		Model:       "Qwen/Qwen2.5-VL-7B-Instruct",
+		Mode:        "multimodal",
+	}).normalize()
+	require.NoError(t, err)
+
+	cfg := &runtimeConfiguration{
+		ServiceBaseURL: "http://localhost:8000/v1/chat/completions",
+		AuthMode:       "bearer",
+		AuthToken:      "global-secret",
+		AllowHosts:     []string{parsedURL.Hostname()},
+		DefaultTimeout: 5 * time.Second,
+		BotDefinitions: []BotDefinition{bot},
+	}
+
+	status, err := (&Plugin{}).testDoc2VLLMConnection(context.Background(), cfg, bot.ID)
+	require.NoError(t, err)
+	require.True(t, status.OK)
+	require.Equal(t, bot.ID, status.BotID)
+	require.Equal(t, bot.DisplayName, status.BotName)
+	require.Equal(t, bot.Model, status.Model)
+	require.Equal(t, bot.Mode, status.Mode)
+	require.Equal(t, "x-api-key", status.AuthMode)
+	require.Equal(t, "bot-secret", authHeader)
+	require.Contains(t, string(bodyBytes), bot.Model)
 }
 
 func TestClassifyDoc2VLLMHTTPErrorUnauthorized(t *testing.T) {
