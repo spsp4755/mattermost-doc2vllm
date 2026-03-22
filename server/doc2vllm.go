@@ -51,6 +51,7 @@ type doc2vllmConnectionStatus struct {
 type doc2vllmChatRequest struct {
 	Model       string            `json:"model"`
 	Messages    []doc2vllmMessage `json:"messages"`
+	Stream      bool              `json:"stream,omitempty"`
 	Temperature float64           `json:"temperature"`
 	MaxTokens   int               `json:"max_tokens"`
 	TopP        float64           `json:"top_p"`
@@ -286,6 +287,33 @@ func (p *Plugin) invokeDoc2VLLMOCR(
 	return result, statusCode, elapsed, nil
 }
 
+func (p *Plugin) invokeDoc2VLLMOCRStream(
+	ctx context.Context,
+	service doc2vllmServiceConfig,
+	bot BotDefinition,
+	attachment botAttachment,
+	userPrompt string,
+	correlationID string,
+	onSnapshot func(string) error,
+) (doc2vllmDocumentResult, int, time.Duration, error) {
+	requestPayload, requestDebug, requestPrompt, err := buildDoc2VLLMChatRequest(service, bot, &attachment, userPrompt, "", nil, correlationID)
+	if err != nil {
+		return doc2vllmDocumentResult{}, 0, 0, err
+	}
+	requestPayload.Stream = true
+
+	startedAt := time.Now()
+	result, statusCode, err := p.performDoc2VLLMStreamRequest(ctx, service, bot, attachment, requestPayload, requestDebug, onSnapshot)
+	elapsed := time.Since(startedAt)
+	if err != nil {
+		return result, statusCode, elapsed, err
+	}
+
+	result.RequestPrompt = requestPrompt
+	result.RequestDebugs = append(result.RequestDebugs, requestDebug)
+	return result, statusCode, elapsed, nil
+}
+
 func buildDoc2VLLMChatRequest(
 	service doc2vllmServiceConfig,
 	bot BotDefinition,
@@ -473,6 +501,31 @@ func (p *Plugin) invokeDoc2VLLMConversation(
 	return result.Response, requestDebug, elapsed, statusCode, nil
 }
 
+func (p *Plugin) invokeDoc2VLLMConversationStream(
+	ctx context.Context,
+	service doc2vllmServiceConfig,
+	bot BotDefinition,
+	documentContext string,
+	turns []conversationTurn,
+	userPrompt string,
+	correlationID string,
+	onSnapshot func(string) error,
+) (doc2vllmOCRResponse, doc2vllmRequestDebug, time.Duration, int, error) {
+	requestPayload, requestDebug, _, err := buildDoc2VLLMChatRequest(service, bot, nil, userPrompt, documentContext, turns, correlationID)
+	if err != nil {
+		return doc2vllmOCRResponse{}, doc2vllmRequestDebug{}, 0, 0, err
+	}
+	requestPayload.Stream = true
+
+	startedAt := time.Now()
+	result, statusCode, err := p.performDoc2VLLMStreamRequest(ctx, service, bot, botAttachment{}, requestPayload, requestDebug, onSnapshot)
+	elapsed := time.Since(startedAt)
+	if err != nil {
+		return doc2vllmOCRResponse{}, doc2vllmRequestDebug{}, elapsed, statusCode, err
+	}
+	return result.Response, requestDebug, elapsed, statusCode, nil
+}
+
 func newDirectTextDocumentResult(attachment botAttachment, text, model, source, processor string) doc2vllmDocumentResult {
 	return doc2vllmDocumentResult{
 		Attachment: attachment,
@@ -532,6 +585,9 @@ func buildDoc2VLLMRequestBody(requestPayload doc2vllmChatRequest, bot BotDefinit
 		"temperature": requestPayload.Temperature,
 		"max_tokens":  requestPayload.MaxTokens,
 		"top_p":       requestPayload.TopP,
+	}
+	if requestPayload.Stream {
+		body["stream"] = true
 	}
 
 	if bot.PresencePenalty != 0 {
@@ -674,6 +730,104 @@ func (p *Plugin) performDoc2VLLMRequest(
 	return doc2vllmDocumentResult{
 		Attachment: attachment,
 		Response:   parsed,
+	}, response.StatusCode, nil
+}
+
+func (p *Plugin) performDoc2VLLMStreamRequest(
+	ctx context.Context,
+	service doc2vllmServiceConfig,
+	bot BotDefinition,
+	attachment botAttachment,
+	requestPayload doc2vllmChatRequest,
+	requestDebug doc2vllmRequestDebug,
+	onSnapshot func(string) error,
+) (doc2vllmDocumentResult, int, error) {
+	requestBody, err := buildDoc2VLLMRequestBody(requestPayload, bot)
+	if err != nil {
+		return doc2vllmDocumentResult{}, 0, err
+	}
+
+	bodyBytes, err := json.Marshal(requestBody)
+	if err != nil {
+		return doc2vllmDocumentResult{}, 0, fmt.Errorf("failed to encode Doc2VLLM OCR request: %w", err)
+	}
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, service.BaseURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return doc2vllmDocumentResult{}, 0, fmt.Errorf("failed to build Doc2VLLM OCR request: %w", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "text/event-stream")
+	request.Header.Set("Cache-Control", "no-cache")
+	request.Header.Set("X-Correlation-ID", strings.TrimSpace(requestDebug.Correlation))
+	applyAuthHeader(request, service.AuthMode, service.AuthToken)
+
+	client := &http.Client{Timeout: resolveDoc2VLLMRequestTimeout(service.Timeout)}
+	response, err := client.Do(request)
+	if err != nil {
+		return doc2vllmDocumentResult{}, 0, attachDoc2VLLMDebug(
+			classifyDoc2VLLMRequestError(service.BaseURL, err),
+			requestDebug,
+			doc2vllmResponseDebug{},
+		)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode >= http.StatusBadRequest {
+		responseBody, _ := io.ReadAll(io.LimitReader(response.Body, 8*1024*1024))
+		callErr := classifyDoc2VLLMHTTPError(service.BaseURL, response.StatusCode, response.Header, responseBody)
+		return doc2vllmDocumentResult{}, response.StatusCode, attachDoc2VLLMDebug(
+			callErr,
+			requestDebug,
+			buildDoc2VLLMResponseDebug(response.StatusCode, response.Header, responseBody, callErr),
+		)
+	}
+
+	content, err := consumeOpenAITextStream(response.Body, onSnapshot)
+	if err != nil {
+		callErr := newDoc2VLLMCallError(
+			"stream_decode_failed",
+			"Doc2VLLM streaming 응답을 해석하지 못했습니다.",
+			err.Error(),
+			"stream 지원 여부와 OpenAI 호환 streaming 형식을 확인하세요.",
+			service.BaseURL,
+			response.StatusCode,
+			true,
+		)
+		return doc2vllmDocumentResult{}, response.StatusCode, callErr.withDebug(
+			requestDebug,
+			buildDoc2VLLMResponseDebug(response.StatusCode, response.Header, nil, callErr),
+		)
+	}
+	if strings.TrimSpace(content) == "" {
+		callErr := newDoc2VLLMCallError(
+			"empty_response",
+			"Doc2VLLM streaming 응답이 비어 있습니다.",
+			"streaming 응답에서 텍스트 조각을 찾지 못했습니다.",
+			"모델의 stream 지원 여부를 확인하거나 일반 응답 방식으로 다시 시도하세요.",
+			service.BaseURL,
+			response.StatusCode,
+			false,
+		)
+		return doc2vllmDocumentResult{}, response.StatusCode, callErr.withDebug(
+			requestDebug,
+			buildDoc2VLLMResponseDebug(response.StatusCode, response.Header, nil, callErr),
+		)
+	}
+
+	return doc2vllmDocumentResult{
+		Attachment: attachment,
+		Response: doc2vllmOCRResponse{
+			Model: defaultIfEmpty(strings.TrimSpace(bot.Model), defaultDoc2VLLMModel),
+			Choices: []doc2vllmChoice{{
+				Index: 0,
+				Message: doc2vllmChoiceMessage{
+					Role:    "assistant",
+					Content: content,
+				},
+				FinishReason: "stop",
+			}},
+		},
 	}, response.StatusCode, nil
 }
 

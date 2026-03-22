@@ -79,6 +79,8 @@ func TestConfigurationGetStoredPluginConfigDefaultsWhenEmpty(t *testing.T) {
 	require.Equal(t, defaultDoc2VLLMEndpointURL, stored.Service.BaseURL)
 	require.Equal(t, "", stored.Service.AuthToken)
 	require.Equal(t, defaultTimeoutSeconds, stored.Runtime.DefaultTimeoutSeconds)
+	require.True(t, normalizeStreamingEnabled(stored.Runtime))
+	require.Equal(t, defaultStreamingUpdateMS, positiveOrDefault(stored.Runtime.StreamingUpdateMS, defaultStreamingUpdateMS))
 	require.Equal(t, defaultPDFRasterDPI, stored.Runtime.PDFRasterDPI)
 	require.Equal(t, defaultMaxPDFPages, stored.Runtime.MaxPDFPages)
 	require.True(t, stored.Runtime.EnableUsageLogs)
@@ -115,6 +117,8 @@ func TestConfigurationNormalizeFromConfig(t *testing.T) {
 	require.Equal(t, "x-api-key", runtimeCfg.AuthMode)
 	require.Equal(t, "secret", runtimeCfg.AuthToken)
 	require.Equal(t, 55, int(runtimeCfg.DefaultTimeout.Seconds()))
+	require.True(t, runtimeCfg.EnableStreaming)
+	require.Equal(t, defaultStreamingUpdateMS, runtimeCfg.StreamingUpdateMS)
 	require.Equal(t, 300, runtimeCfg.PDFRasterDPI)
 	require.Equal(t, 12, runtimeCfg.MaxPDFPages)
 	require.True(t, runtimeCfg.MaskSensitiveData)
@@ -122,6 +126,38 @@ func TestConfigurationNormalizeFromConfig(t *testing.T) {
 	require.Len(t, runtimeCfg.BotDefinitions, 1)
 	require.Equal(t, "summary-bot", runtimeCfg.BotDefinitions[0].ID)
 	require.Contains(t, runtimeCfg.AllowHosts, "localhost")
+}
+
+func TestConsumeOpenAITextStream(t *testing.T) {
+	stream := strings.NewReader("data: {\"choices\":[{\"delta\":{\"content\":\"안녕\"}}]}\n\n" +
+		"data: {\"choices\":[{\"delta\":{\"content\":\" 하세요\"}}]}\n\n" +
+		"data: [DONE]\n\n")
+
+	snapshots := make([]string, 0)
+	content, err := consumeOpenAITextStream(stream, func(snapshot string) error {
+		snapshots = append(snapshots, snapshot)
+		return nil
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "안녕 하세요", content)
+	require.Equal(t, []string{"안녕", "안녕 하세요"}, snapshots)
+}
+
+func TestBuildDoc2VLLMRequestBodyIncludesStream(t *testing.T) {
+	body, err := buildDoc2VLLMRequestBody(doc2vllmChatRequest{
+		Model: "doc2vllm-ocr",
+		Messages: []doc2vllmMessage{{
+			Role:    "user",
+			Content: "hello",
+		}},
+		Stream:      true,
+		Temperature: 0,
+		MaxTokens:   256,
+		TopP:        1,
+	}, BotDefinition{})
+	require.NoError(t, err)
+	require.Equal(t, true, body["stream"])
 }
 
 func TestConfigurationNormalizeAutoAllowsConfiguredBotAndRefinerHosts(t *testing.T) {

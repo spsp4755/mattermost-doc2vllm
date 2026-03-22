@@ -15,6 +15,8 @@ const (
 	defaultTimeoutSeconds      = 30
 	defaultMaxInputLength      = 4000
 	defaultMaxOutputLength     = 8000
+	defaultEnableStreaming     = true
+	defaultStreamingUpdateMS   = 800
 	defaultDoc2VLLMEndpointURL = "http://localhost:8000/v1/chat/completions"
 	defaultPDFRasterDPI        = 200
 	defaultMaxPDFPages         = 20
@@ -60,6 +62,8 @@ type runtimeConfiguration struct {
 	AllowHosts        []string
 	BotDefinitions    []BotDefinition
 	DefaultTimeout    time.Duration
+	EnableStreaming   bool
+	StreamingUpdateMS int
 	MaxInputLength    int
 	MaxOutputLength   int
 	PDFRasterDPI      int
@@ -109,6 +113,8 @@ func defaultStoredPluginConfig() storedPluginConfig {
 		},
 		Runtime: storedRuntimeConfig{
 			DefaultTimeoutSeconds: defaultTimeoutSeconds,
+			EnableStreaming:       defaultEnableStreaming,
+			StreamingUpdateMS:     defaultStreamingUpdateMS,
 			MaxInputLength:        defaultMaxInputLength,
 			MaxOutputLength:       defaultMaxOutputLength,
 			PDFRasterDPI:          defaultPDFRasterDPI,
@@ -123,6 +129,8 @@ func (c storedPluginConfig) normalize() (*runtimeConfiguration, error) {
 	cfg := &runtimeConfiguration{
 		AuthMode:          normalizeAuthMode(c.Service.AuthMode),
 		AuthToken:         strings.TrimSpace(c.Service.AuthToken),
+		EnableStreaming:   normalizeStreamingEnabled(c.Runtime),
+		StreamingUpdateMS: positiveOrDefault(c.Runtime.StreamingUpdateMS, defaultStreamingUpdateMS),
 		MaxInputLength:    positiveOrDefault(c.Runtime.MaxInputLength, defaultMaxInputLength),
 		MaxOutputLength:   positiveOrDefault(c.Runtime.MaxOutputLength, defaultMaxOutputLength),
 		PDFRasterDPI:      positiveOrDefault(c.Runtime.PDFRasterDPI, defaultPDFRasterDPI),
@@ -153,6 +161,13 @@ func (c storedPluginConfig) normalize() (*runtimeConfiguration, error) {
 	cfg.AllowHosts = normalizeAllowHosts(c.Service.AllowHosts, cfg.ParsedBaseURL, cfg.BotDefinitions)
 
 	return cfg, nil
+}
+
+func normalizeStreamingEnabled(runtime storedRuntimeConfig) bool {
+	if runtime.StreamingUpdateMS == 0 && !runtime.EnableStreaming {
+		return defaultEnableStreaming
+	}
+	return runtime.EnableStreaming
 }
 
 func normalizeAuthMode(value string) string {

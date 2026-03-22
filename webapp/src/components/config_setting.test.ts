@@ -8,7 +8,7 @@ jest.mock('manifest', () => ({
     __esModule: true,
     default: {
         id: 'com.mattermost.doc2vllm-ocr-test',
-        version: '0.1.11',
+        version: '0.1.12',
     },
 }), {virtual: true});
 
@@ -27,6 +27,8 @@ const draftConfig: AdminPluginConfig = {
     },
     runtime: {
         default_timeout_seconds: 30,
+        enable_streaming: true,
+        streaming_update_ms: 800,
         max_input_length: 4000,
         max_output_length: 8000,
         pdf_raster_dpi: 200,

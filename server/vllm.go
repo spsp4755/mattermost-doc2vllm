@@ -287,6 +287,102 @@ func (p *Plugin) invokeVLLMPostProcess(
 	return strings.TrimSpace(content), marshalDebugPayload(requestDebug), nil
 }
 
+func (p *Plugin) invokeVLLMPostProcessStream(
+	ctx context.Context,
+	service vllmServiceConfig,
+	userMessage string,
+	documentText string,
+	conversationHistory string,
+	task string,
+	correlationID string,
+	onSnapshot func(string) error,
+) (string, string, time.Duration, error) {
+	renderedPrompt := renderVLLMPrompt(service.Prompt, userMessage, documentText, conversationHistory, task)
+	requestPayload := vllmChatRequest{
+		Model: service.Model,
+		Messages: []vllmMessage{{
+			Role:    "user",
+			Content: renderedPrompt,
+		}},
+		Stream: true,
+	}
+	requestDebug := buildVLLMRequestDebug(service, task, service.Prompt, renderedPrompt, userMessage, documentText, conversationHistory, correlationID)
+
+	bodyBytes, err := json.Marshal(requestPayload)
+	if err != nil {
+		return "", "", 0, fmt.Errorf("failed to encode vLLM request: %w", err)
+	}
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, service.BaseURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return "", "", 0, fmt.Errorf("failed to build vLLM request: %w", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "text/event-stream")
+	request.Header.Set("Cache-Control", "no-cache")
+	request.Header.Set("X-Request-Id", correlationID)
+	request.Header.Set("X-Correlation-ID", correlationID)
+	if service.APIKey != "" {
+		request.Header.Set("Authorization", "Bearer "+service.APIKey)
+	}
+
+	startedAt := time.Now()
+	client := &http.Client{Timeout: resolveDoc2VLLMRequestTimeout(service.Timeout)}
+	response, err := client.Do(request)
+	if err != nil {
+		return "", "", time.Since(startedAt), attachVLLMDebug(
+			classifyVLLMRequestError(service.BaseURL, err),
+			requestDebug,
+			vllmResponseDebug{},
+		)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode >= http.StatusBadRequest {
+		responseBody, _ := io.ReadAll(io.LimitReader(response.Body, 8*1024*1024))
+		callErr := classifyVLLMHTTPError(service.BaseURL, response.StatusCode, response.Header, responseBody)
+		return "", "", time.Since(startedAt), attachVLLMDebug(
+			callErr,
+			requestDebug,
+			buildVLLMResponseDebug(response.StatusCode, response.Header, responseBody, callErr),
+		)
+	}
+
+	content, err := consumeOpenAITextStream(response.Body, onSnapshot)
+	if err != nil {
+		callErr := newVLLMCallError(
+			"stream_decode_failed",
+			"vLLM streaming 응답을 해석하지 못했습니다.",
+			err.Error(),
+			"stream 지원 여부와 OpenAI 호환 streaming 형식을 확인하세요.",
+			service.BaseURL,
+			response.StatusCode,
+			true,
+		)
+		return "", "", time.Since(startedAt), callErr.withDebug(
+			requestDebug,
+			buildVLLMResponseDebug(response.StatusCode, response.Header, nil, callErr),
+		)
+	}
+	if strings.TrimSpace(content) == "" {
+		callErr := newVLLMCallError(
+			"empty_response",
+			"vLLM streaming 응답이 비어 있습니다.",
+			"streaming 응답에서 텍스트 조각을 찾지 못했습니다.",
+			"모델의 stream 지원 여부를 확인하거나 일반 응답 방식으로 다시 시도하세요.",
+			service.BaseURL,
+			response.StatusCode,
+			false,
+		)
+		return "", "", time.Since(startedAt), callErr.withDebug(
+			requestDebug,
+			buildVLLMResponseDebug(response.StatusCode, response.Header, nil, callErr),
+		)
+	}
+
+	return strings.TrimSpace(content), marshalDebugPayload(requestDebug), time.Since(startedAt), nil
+}
+
 func renderVLLMPrompt(template, userMessage, documentText, conversationHistory, task string) string {
 	template = strings.TrimSpace(template)
 	userMessage = strings.TrimSpace(userMessage)

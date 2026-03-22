@@ -88,6 +88,8 @@ export type AdminPluginConfig = {
     };
     runtime: {
         default_timeout_seconds: number;
+        enable_streaming: boolean;
+        streaming_update_ms: number;
         max_input_length: number;
         max_output_length: number;
         pdf_raster_dpi: number;

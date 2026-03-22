@@ -42,6 +42,9 @@ const T = {
     allowHosts: '\ud5c8\uc6a9 \ud638\uc2a4\ud2b8',
     allowHostsHelp: '\ube44\uc6cc\ub450\uba74 \uae30\ubcf8 URL, \ubd07 \uc804\uc6a9 URL, \ud6c4\ucc98\ub9ac URL\uc758 \ud638\uc2a4\ud2b8\uac00 \uc790\ub3d9\uc73c\ub85c \ud5c8\uc6a9\ub429\ub2c8\ub2e4.',
     timeout: '\ud0c0\uc784\uc544\uc6c3(\ucd08)',
+    enableStreaming: '가능하면 streaming 사용',
+    enableStreamingHelp: '지원하는 모델은 실시간으로 답변을 갱신하고, 지원하지 않으면 자동으로 일반 응답으로 전환합니다.',
+    streamingUpdateMs: 'Streaming 업데이트 간격(ms)',
     maxInput: '\ucd5c\ub300 \uc785\ub825 \uae38\uc774',
     maxOutput: '\ucd5c\ub300 \ucd9c\ub825 \uae38\uc774',
     pdfDpi: 'PDF DPI',
@@ -153,7 +156,7 @@ type DraftBot = {
 
 type DraftConfig = {
     service: {base_url: string; auth_mode: string; auth_token: string; allow_hosts: string};
-    runtime: {default_timeout_seconds: number; max_input_length: number; max_output_length: number; pdf_raster_dpi: number; max_pdf_pages: number; mask_sensitive_data: boolean; enable_debug_logs: boolean; enable_usage_logs: boolean};
+    runtime: {default_timeout_seconds: number; enable_streaming: boolean; streaming_update_ms: number; max_input_length: number; max_output_length: number; pdf_raster_dpi: number; max_pdf_pages: number; mask_sensitive_data: boolean; enable_debug_logs: boolean; enable_usage_logs: boolean};
     bots: DraftBot[];
 };
 
@@ -319,8 +322,15 @@ export default function ConfigSetting(props: Props) {
                         </div>
                         <div style={row3}>
                             <Field label={T.timeout} help={T.directInput}><input disabled={disabled} type='number' min={1} style={field} value={String(config.runtime.default_timeout_seconds)} onChange={(e) => updateRuntime({default_timeout_seconds: num(e.target.value, 30)})}/></Field>
+                            <Field label={T.streamingUpdateMs} help={T.directInput}><input disabled={disabled} type='number' min={100} step={100} style={field} value={String(config.runtime.streaming_update_ms)} onChange={(e) => updateRuntime({streaming_update_ms: num(e.target.value, 800)})}/></Field>
                             <Field label={T.maxInput} help={T.directInput}><input disabled={disabled} type='number' min={1} style={field} value={String(config.runtime.max_input_length)} onChange={(e) => updateRuntime({max_input_length: num(e.target.value, 4000)})}/></Field>
+                        </div>
+                        <div style={row2}>
                             <Field label={T.maxOutput} help={T.directInput}><input disabled={disabled} type='number' min={1} style={field} value={String(config.runtime.max_output_length)} onChange={(e) => updateRuntime({max_output_length: num(e.target.value, 8000)})}/></Field>
+                            <div style={{display: 'flex', flexDirection: 'column', justifyContent: 'flex-end'}}>
+                                <label><input disabled={disabled} type='checkbox' checked={config.runtime.enable_streaming} onChange={(e) => updateRuntime({enable_streaming: e.target.checked})}/>{` ${T.enableStreaming}`}</label>
+                                <span style={note}>{T.enableStreamingHelp}</span>
+                            </div>
                         </div>
                         <div style={row2}>
                             <Field label={T.pdfDpi}><input disabled={disabled} type='number' min={72} style={field} value={String(config.runtime.pdf_raster_dpi)} onChange={(e) => updateRuntime({pdf_raster_dpi: num(e.target.value, 200)})}/></Field>
@@ -521,7 +531,7 @@ function ManagedBotRow(props: {item: ManagedBotStatus}) {
 function createDefaultConfig(): DraftConfig {
     return {
         service: {base_url: defaultURL, auth_mode: 'bearer', auth_token: '', allow_hosts: ''},
-        runtime: {default_timeout_seconds: 30, max_input_length: 4000, max_output_length: 8000, pdf_raster_dpi: 200, max_pdf_pages: 20, mask_sensitive_data: false, enable_debug_logs: false, enable_usage_logs: true},
+        runtime: {default_timeout_seconds: 30, enable_streaming: true, streaming_update_ms: 800, max_input_length: 4000, max_output_length: 8000, pdf_raster_dpi: 200, max_pdf_pages: 20, mask_sensitive_data: false, enable_debug_logs: false, enable_usage_logs: true},
         bots: [],
     };
 }
@@ -605,7 +615,7 @@ export function normalizeConfig(value?: AdminPluginConfig): DraftConfig {
         auth_token: text(value.service?.auth_token),
         allow_hosts: value.service?.allow_hosts == null ? '' : text(value.service?.allow_hosts),
     };
-    next.runtime = {default_timeout_seconds: num(value.runtime?.default_timeout_seconds, 30), max_input_length: num(value.runtime?.max_input_length, 4000), max_output_length: num(value.runtime?.max_output_length, 8000), pdf_raster_dpi: num(value.runtime?.pdf_raster_dpi, 200), max_pdf_pages: num(value.runtime?.max_pdf_pages, 20), mask_sensitive_data: Boolean(value.runtime?.mask_sensitive_data), enable_debug_logs: Boolean(value.runtime?.enable_debug_logs), enable_usage_logs: value.runtime?.enable_usage_logs !== false};
+    next.runtime = {default_timeout_seconds: num(value.runtime?.default_timeout_seconds, 30), enable_streaming: value.runtime?.enable_streaming !== false || !value.runtime?.streaming_update_ms, streaming_update_ms: num(value.runtime?.streaming_update_ms, 800), max_input_length: num(value.runtime?.max_input_length, 4000), max_output_length: num(value.runtime?.max_output_length, 8000), pdf_raster_dpi: num(value.runtime?.pdf_raster_dpi, 200), max_pdf_pages: num(value.runtime?.max_pdf_pages, 20), mask_sensitive_data: Boolean(value.runtime?.mask_sensitive_data), enable_debug_logs: Boolean(value.runtime?.enable_debug_logs), enable_usage_logs: value.runtime?.enable_usage_logs !== false};
     next.bots = Array.isArray(value.bots) ? value.bots.map((item, index) => normalizeBot(item, index, next.runtime.mask_sensitive_data)) : [];
     return next;
 }
@@ -613,7 +623,7 @@ export function normalizeConfig(value?: AdminPluginConfig): DraftConfig {
 export function buildConfig(config: DraftConfig): AdminPluginConfig {
     return {
         service: {base_url: text(config.service.base_url), auth_mode: auth(config.service.auth_mode), auth_token: text(config.service.auth_token), allow_hosts: text(config.service.allow_hosts)},
-        runtime: {default_timeout_seconds: num(config.runtime.default_timeout_seconds, 30), max_input_length: num(config.runtime.max_input_length, 4000), max_output_length: num(config.runtime.max_output_length, 8000), pdf_raster_dpi: num(config.runtime.pdf_raster_dpi, 200), max_pdf_pages: num(config.runtime.max_pdf_pages, 20), mask_sensitive_data: Boolean(config.runtime.mask_sensitive_data), enable_debug_logs: Boolean(config.runtime.enable_debug_logs), enable_usage_logs: Boolean(config.runtime.enable_usage_logs)},
+        runtime: {default_timeout_seconds: num(config.runtime.default_timeout_seconds, 30), enable_streaming: Boolean(config.runtime.enable_streaming), streaming_update_ms: num(config.runtime.streaming_update_ms, 800), max_input_length: num(config.runtime.max_input_length, 4000), max_output_length: num(config.runtime.max_output_length, 8000), pdf_raster_dpi: num(config.runtime.pdf_raster_dpi, 200), max_pdf_pages: num(config.runtime.max_pdf_pages, 20), mask_sensitive_data: Boolean(config.runtime.mask_sensitive_data), enable_debug_logs: Boolean(config.runtime.enable_debug_logs), enable_usage_logs: Boolean(config.runtime.enable_usage_logs)},
         bots: config.bots.map((item) => ({
             id: idValue(item.bot_id || item.username, item.local_id),
             username: user(item.username),

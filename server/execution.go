@@ -115,34 +115,80 @@ func (p *Plugin) executeBotAndPost(ctx context.Context, request BotRunRequest) (
 		return nil, fmt.Errorf("message exceeds the maximum input length of %d characters", cfg.MaxInputLength)
 	}
 
+	progress, progressErr := p.newBotProgressPost(channel, request.RootID, account, correlationID, cfg, startedAt)
+	if progressErr != nil {
+		p.API.LogWarn("Failed to create Doc2VLLM progress post", "error", progressErr, "correlation_id", correlationID)
+	}
+	_ = p.updateProgressPost(progress, "첨부 파일 확인", "첨부 파일과 프롬프트를 확인하고 있습니다.", "", startedAt, true)
+
 	attachments, err := p.collectBotAttachments(request.FileIDs, request.ChannelID)
 	if err != nil {
+		failure := describeExecutionFailure(err, true, time.Since(startedAt))
+		if strings.TrimSpace(failure.StageLabel) == "" {
+			failure.StageLabel = "첨부 파일 확인"
+		}
+		p.finalizeExecutionFailure(cfg, request, account, channel, progress, correlationID, prompt, failure, startedAt)
 		return nil, err
 	}
 	if len(attachments) == 0 && strings.TrimSpace(request.RootID) != "" {
-		return p.executeThreadConversation(ctx, cfg, request, *bot, account, channel, startedAt, correlationID)
+		return p.executeThreadConversation(ctx, cfg, request, *bot, account, channel, progress, startedAt, correlationID)
 	}
+	_ = p.updateProgressPost(progress, "문서 전처리", fmt.Sprintf("첨부 파일 %d개를 확인했고, 문서 전처리를 시작합니다.", len(attachments)), "", startedAt, true)
 	preparedInputs, processingFailures := p.prepareOCRInputs(ctx, cfg, attachments)
 	if len(preparedInputs) == 0 && len(processingFailures) == 0 {
-		return nil, fmt.Errorf("attach at least one image, PDF, DOCX, XLSX, or PPTX file before asking @%s", bot.Username)
+		err := fmt.Errorf("attach at least one image, PDF, DOCX, XLSX, or PPTX file before asking @%s", bot.Username)
+		failure := executionFailureView{
+			HasFailure:  true,
+			StageLabel:  "입력 확인",
+			Message:     err.Error(),
+			Hint:        "이미지, PDF, DOCX, XLSX, PPTX 파일을 먼저 첨부한 뒤 다시 요청해 주세요.",
+			APIDuration: time.Since(startedAt),
+		}
+		p.finalizeExecutionFailure(cfg, request, account, channel, progress, correlationID, prompt, failure, startedAt)
+		return nil, err
 	}
+	_ = p.updateProgressPost(progress, "OCR 준비 완료", buildPreparedInputStatus(preparedInputs), "", startedAt, true)
 
 	serviceConfig, err := cfg.serviceConfigForBot(*bot)
 	if err != nil {
+		failure := describeExecutionFailure(err, true, time.Since(startedAt))
+		if strings.TrimSpace(failure.StageLabel) == "" {
+			failure.StageLabel = "서비스 설정"
+		}
+		p.finalizeExecutionFailure(cfg, request, account, channel, progress, correlationID, prompt, failure, startedAt)
 		return nil, err
 	}
 
 	results := make([]doc2vllmDocumentResult, 0, len(preparedInputs))
 	requestDebugs := make([]doc2vllmRequestDebug, 0, len(preparedInputs))
 	apiDurationTotal := time.Duration(0)
-	for _, preparedInput := range preparedInputs {
+	for index, preparedInput := range preparedInputs {
 		if preparedInput.DirectResult != nil {
+			_ = p.updateProgressPost(progress, "텍스트 추출 정리", fmt.Sprintf("%s에서 직접 추출한 텍스트를 정리하고 있습니다.", preparedInput.Attachment.Name), "", startedAt, true)
 			results = append(results, *preparedInput.DirectResult)
 			continue
 		}
 
 		attachment := preparedInput.Attachment
-		result, _, apiDuration, invokeErr := p.invokeDoc2VLLMOCR(ctx, serviceConfig, *bot, attachment, prompt, correlationID)
+		_ = p.updateProgressPost(progress, fmt.Sprintf("OCR 실행 %d/%d", index+1, len(preparedInputs)), fmt.Sprintf("%s 파일을 OCR 모델로 분석하고 있습니다.", attachment.Name), "", startedAt, true)
+
+		var (
+			result doc2vllmDocumentResult
+			apiDuration time.Duration
+			invokeErr error
+		)
+		if shouldStreamInitialOCR(cfg, *bot, preparedInputs, processingFailures) {
+			result, _, apiDuration, invokeErr = p.invokeDoc2VLLMOCRStream(ctx, serviceConfig, *bot, attachment, prompt, correlationID, func(content string) error {
+				return p.updateProgressPost(progress, "OCR 응답 생성 중", fmt.Sprintf("%s 파일의 응답을 받아오고 있습니다.", attachment.Name), content, startedAt, false)
+			})
+			if invokeErr != nil {
+				p.API.LogWarn("Streaming OCR failed; falling back to standard OCR request", "correlation_id", correlationID, "bot_id", bot.ID, "error", invokeErr)
+				_ = p.updateProgressPost(progress, "일반 응답으로 전환", "Streaming을 사용할 수 없어 일반 응답 방식으로 계속 진행합니다.", "", startedAt, true)
+			}
+		}
+		if invokeErr != nil || result.Response.Choices == nil {
+			result, _, apiDuration, invokeErr = p.invokeDoc2VLLMOCR(ctx, serviceConfig, *bot, attachment, prompt, correlationID)
+		}
 		apiDurationTotal += apiDuration
 		if invokeErr != nil {
 			invokeErr = attachDoc2VLLMAttemptDebug(invokeErr, requestDebugs)
@@ -163,7 +209,7 @@ func (p *Plugin) executeBotAndPost(ctx context.Context, request BotRunRequest) (
 		record := newExecutionRecord(request, account.Definition, correlationID, "failed", effectivePrompt, failure.Message, failure.ErrorCode, failure.Retryable, startedAt, time.Now())
 		p.appendExecutionHistory(request.UserID, record)
 		p.logUsage(cfg, correlationID, request, account.Definition, "failed", failure.Message)
-		if postErr := p.postFailure(channel, request.RootID, account, correlationID, failure); postErr != nil {
+		if _, postErr := p.postFailure(channel, request.RootID, account, progressPost(progress), correlationID, failure); postErr != nil {
 			p.API.LogError("Failed to post Doc2VLLM error response", "error", postErr, "correlation_id", correlationID)
 		}
 		return &BotRunResult{
@@ -205,7 +251,26 @@ func (p *Plugin) executeBotAndPost(ctx context.Context, request BotRunRequest) (
 			output = buildVLLMFallbackOutput(documentContext, "vLLM 후처리 설정을 확인하지 못해 Doc2VLLM OCR 결과를 대신 표시합니다.")
 		}
 		if vllmErr == nil {
-			vllmOutput, vllmDebug, invokeErr := p.invokeVLLMPostProcess(ctx, vllmConfig, effectivePrompt, sourceDocumentContext, "", vllmTaskOCRRefine, correlationID)
+			_ = p.updateProgressPost(progress, "후처리 실행", "OCR 결과를 후처리 모델로 정리하고 있습니다.", "", startedAt, true)
+			vllmOutput := ""
+			vllmDebug := ""
+			var invokeErr error
+			if cfg.EnableStreaming {
+				streamDuration := time.Duration(0)
+				vllmOutput, vllmDebug, streamDuration, invokeErr = p.invokeVLLMPostProcessStream(ctx, vllmConfig, effectivePrompt, sourceDocumentContext, "", vllmTaskOCRRefine, correlationID, func(content string) error {
+					return p.updateProgressPost(progress, "후처리 응답 생성 중", "후처리 모델 응답을 받아오고 있습니다.", content, startedAt, false)
+				})
+				apiDurationTotal += streamDuration
+				if invokeErr != nil {
+					p.API.LogWarn("Streaming vLLM post-processing failed; falling back to standard request", "correlation_id", correlationID, "bot_id", bot.ID, "error", invokeErr)
+					_ = p.updateProgressPost(progress, "일반 응답으로 전환", "Streaming을 사용할 수 없어 일반 응답 방식으로 계속 진행합니다.", "", startedAt, true)
+				}
+			}
+			if invokeErr != nil || vllmOutput == "" {
+				invokeStartedAt := time.Now()
+				vllmOutput, vllmDebug, invokeErr = p.invokeVLLMPostProcess(ctx, vllmConfig, effectivePrompt, sourceDocumentContext, "", vllmTaskOCRRefine, correlationID)
+				apiDurationTotal += time.Since(invokeStartedAt)
+			}
 			if invokeErr != nil {
 				failure := describeExecutionFailure(invokeErr, true, apiDurationTotal)
 				output = buildVLLMFallbackOutput(output, "vLLM 후처리에 실패해 Doc2VLLM OCR 결과를 대신 표시합니다.")
@@ -223,7 +288,8 @@ func (p *Plugin) executeBotAndPost(ctx context.Context, request BotRunRequest) (
 		}
 	}
 
-	post, err := p.postSuccess(channel, request.RootID, account, correlationID, output, debugView, apiDurationTotal)
+	_ = p.updateProgressPost(progress, "응답 정리", "최종 답변을 정리하고 있습니다.", "", startedAt, true)
+	post, err := p.postSuccess(channel, request.RootID, account, progressPost(progress), correlationID, output, debugView, apiDurationTotal)
 	if err != nil {
 		failure := describeExecutionFailure(err, true, apiDurationTotal)
 		record := newExecutionRecord(request, account.Definition, correlationID, "failed", effectivePrompt, failure.Message, failure.ErrorCode, failure.Retryable, startedAt, time.Now())
@@ -276,50 +342,102 @@ func (p *Plugin) executeThreadConversation(
 	bot BotDefinition,
 	account botAccount,
 	channel *model.Channel,
+	progress *botProgressPost,
 	startedAt time.Time,
 	correlationID string,
 ) (*BotRunResult, error) {
 	state, err := p.getThreadConversationState(request.RootID)
 	if err != nil {
+		failure := describeExecutionFailure(err, true, time.Since(startedAt))
+		if strings.TrimSpace(failure.StageLabel) == "" {
+			failure.StageLabel = "대화 상태 확인"
+		}
+		p.finalizeExecutionFailure(cfg, request, account, channel, progress, correlationID, request.Prompt, failure, startedAt)
 		return nil, err
 	}
 	if state == nil || strings.TrimSpace(state.DocumentContext) == "" {
-		return nil, fmt.Errorf("attach at least one image, PDF, DOCX, XLSX, or PPTX file before asking @%s", bot.Username)
+		err := fmt.Errorf("attach at least one image, PDF, DOCX, XLSX, or PPTX file before asking @%s", bot.Username)
+		p.finalizeExecutionFailure(cfg, request, account, channel, progress, correlationID, request.Prompt, executionFailureView{
+			HasFailure:  true,
+			StageLabel:  "질문 확인",
+			Message:     err.Error(),
+			Hint:        "같은 스레드에서 먼저 문서를 OCR 처리한 뒤 후속 질문을 보내 주세요.",
+			APIDuration: time.Since(startedAt),
+		}, startedAt)
+		return nil, err
 	}
 	if state.BotID != "" && !strings.EqualFold(state.BotID, bot.ID) {
-		return nil, fmt.Errorf("thread conversation is already bound to a different bot")
+		err := fmt.Errorf("thread conversation is already bound to a different bot")
+		p.finalizeExecutionFailure(cfg, request, account, channel, progress, correlationID, request.Prompt, executionFailureView{
+			HasFailure:  true,
+			StageLabel:  "질문 확인",
+			Message:     err.Error(),
+			Hint:        "같은 스레드에서는 처음 OCR을 처리한 봇과 계속 대화해 주세요.",
+			APIDuration: time.Since(startedAt),
+		}, startedAt)
+		return nil, err
 	}
 
 	effectivePrompt := strings.TrimSpace(request.Prompt)
 	apiDuration := time.Duration(0)
 	output := ""
 	debugView := successDebugView{}
+	_ = p.updateProgressPost(progress, "질문 확인", "이전 OCR 결과를 바탕으로 후속 질문을 처리하고 있습니다.", "", startedAt, true)
 
 	if bot.shouldUseVLLMForFollowUps() {
 		vllmConfig, configErr := cfg.serviceConfigForVLLMBot(bot)
 		if configErr != nil {
+			failure := describeExecutionFailure(configErr, true, time.Since(startedAt))
+			if strings.TrimSpace(failure.StageLabel) == "" {
+				failure.StageLabel = "후처리 설정"
+			}
+			p.finalizeExecutionFailure(cfg, request, account, channel, progress, correlationID, effectivePrompt, failure, startedAt)
 			return nil, configErr
 		}
 		if effectivePrompt == "" {
 			effectivePrompt = "Please continue using the extracted document context."
 		}
 
-		invokeStartedAt := time.Now()
-		vllmOutput, vllmDebug, invokeErr := p.invokeVLLMPostProcess(
-			ctx,
-			vllmConfig,
-			effectivePrompt,
-			state.DocumentContext,
-			buildDoc2VLLMConversationHistory(state.Turns),
-			vllmTaskFollowupAnswer,
-			correlationID,
-		)
-		apiDuration = time.Since(invokeStartedAt)
+		_ = p.updateProgressPost(progress, "답변 생성", "후속 질문에 대한 답변을 생성하고 있습니다.", "", startedAt, true)
+		vllmOutput := ""
+		vllmDebug := ""
+		var invokeErr error
+		if cfg.EnableStreaming {
+			vllmOutput, vllmDebug, apiDuration, invokeErr = p.invokeVLLMPostProcessStream(
+				ctx,
+				vllmConfig,
+				effectivePrompt,
+				state.DocumentContext,
+				buildDoc2VLLMConversationHistory(state.Turns),
+				vllmTaskFollowupAnswer,
+				correlationID,
+				func(content string) error {
+					return p.updateProgressPost(progress, "답변 생성 중", "모델 응답을 실시간으로 받아오고 있습니다.", content, startedAt, false)
+				},
+			)
+			if invokeErr != nil {
+				p.API.LogWarn("Streaming follow-up vLLM request failed; falling back to standard request", "correlation_id", correlationID, "bot_id", bot.ID, "error", invokeErr)
+				_ = p.updateProgressPost(progress, "일반 응답으로 전환", "Streaming을 사용할 수 없어 일반 응답 방식으로 계속 진행합니다.", "", startedAt, true)
+			}
+		}
+		if invokeErr != nil || vllmOutput == "" {
+			invokeStartedAt := time.Now()
+			vllmOutput, vllmDebug, invokeErr = p.invokeVLLMPostProcess(
+				ctx,
+				vllmConfig,
+				effectivePrompt,
+				state.DocumentContext,
+				buildDoc2VLLMConversationHistory(state.Turns),
+				vllmTaskFollowupAnswer,
+				correlationID,
+			)
+			apiDuration = time.Since(invokeStartedAt)
+		}
 		if invokeErr != nil {
 			failure := describeExecutionFailure(invokeErr, true, apiDuration)
 			record := newExecutionRecord(request, account.Definition, correlationID, "failed", effectivePrompt, failure.Message, failure.ErrorCode, failure.Retryable, startedAt, time.Now())
 			p.appendExecutionHistory(request.UserID, record)
-			if postErr := p.postFailure(channel, request.RootID, account, correlationID, failure); postErr != nil {
+			if _, postErr := p.postFailure(channel, request.RootID, account, progressPost(progress), correlationID, failure); postErr != nil {
 				p.API.LogError("Failed to post Doc2VLLM conversation error", "error", postErr, "correlation_id", correlationID)
 			}
 			return &BotRunResult{
@@ -347,19 +465,47 @@ func (p *Plugin) executeThreadConversation(
 	} else {
 		serviceConfig, err := cfg.serviceConfigForBot(bot)
 		if err != nil {
+			failure := describeExecutionFailure(err, true, time.Since(startedAt))
+			if strings.TrimSpace(failure.StageLabel) == "" {
+				failure.StageLabel = "서비스 설정"
+			}
+			p.finalizeExecutionFailure(cfg, request, account, channel, progress, correlationID, effectivePrompt, failure, startedAt)
 			return nil, err
 		}
 
-		response, requestDebug, invokeDuration, _, invokeErr := p.invokeDoc2VLLMConversation(
-			ctx,
-			serviceConfig,
-			bot,
-			state.DocumentContext,
-			state.Turns,
-			request.Prompt,
-			correlationID,
-		)
-		apiDuration = invokeDuration
+		_ = p.updateProgressPost(progress, "답변 생성", "후속 질문에 대한 답변을 생성하고 있습니다.", "", startedAt, true)
+		response := doc2vllmOCRResponse{}
+		requestDebug := doc2vllmRequestDebug{}
+		var invokeErr error
+		if cfg.EnableStreaming {
+			response, requestDebug, apiDuration, _, invokeErr = p.invokeDoc2VLLMConversationStream(
+				ctx,
+				serviceConfig,
+				bot,
+				state.DocumentContext,
+				state.Turns,
+				request.Prompt,
+				correlationID,
+				func(content string) error {
+					return p.updateProgressPost(progress, "답변 생성 중", "모델 응답을 실시간으로 받아오고 있습니다.", content, startedAt, false)
+				},
+			)
+			if invokeErr != nil {
+				p.API.LogWarn("Streaming follow-up Doc2VLLM request failed; falling back to standard request", "correlation_id", correlationID, "bot_id", bot.ID, "error", invokeErr)
+				_ = p.updateProgressPost(progress, "일반 응답으로 전환", "Streaming을 사용할 수 없어 일반 응답 방식으로 계속 진행합니다.", "", startedAt, true)
+			}
+		}
+		if invokeErr != nil || len(response.Choices) == 0 {
+			response, requestDebug, apiDuration, _, invokeErr = p.invokeDoc2VLLMConversation(
+				ctx,
+				serviceConfig,
+				bot,
+				state.DocumentContext,
+				state.Turns,
+				request.Prompt,
+				correlationID,
+			)
+		}
 		if effectivePrompt == "" {
 			effectivePrompt = strings.TrimSpace(requestDebug.EffectiveUserPrompt)
 		}
@@ -367,7 +513,7 @@ func (p *Plugin) executeThreadConversation(
 			failure := describeExecutionFailure(invokeErr, true, apiDuration)
 			record := newExecutionRecord(request, account.Definition, correlationID, "failed", effectivePrompt, failure.Message, failure.ErrorCode, failure.Retryable, startedAt, time.Now())
 			p.appendExecutionHistory(request.UserID, record)
-			if postErr := p.postFailure(channel, request.RootID, account, correlationID, failure); postErr != nil {
+			if _, postErr := p.postFailure(channel, request.RootID, account, progressPost(progress), correlationID, failure); postErr != nil {
 				p.API.LogError("Failed to post Doc2VLLM conversation error", "error", postErr, "correlation_id", correlationID)
 			}
 			return &BotRunResult{
@@ -397,7 +543,8 @@ func (p *Plugin) executeThreadConversation(
 	if bot.shouldMaskSensitiveData(cfg.MaskSensitiveData) {
 		output = truncateString(maskSensitiveContent(output), cfg.MaxOutputLength)
 	}
-	post, err := p.postSuccess(channel, request.RootID, account, correlationID, output, debugView, apiDuration)
+	_ = p.updateProgressPost(progress, "응답 정리", "최종 답변을 정리하고 있습니다.", "", startedAt, true)
+	post, err := p.postSuccess(channel, request.RootID, account, progressPost(progress), correlationID, output, debugView, apiDuration)
 	if err != nil {
 		record := newExecutionRecord(request, account.Definition, correlationID, "failed", effectivePrompt, err.Error(), "", true, startedAt, time.Now())
 		p.appendExecutionHistory(request.UserID, record)
@@ -427,6 +574,69 @@ func (p *Plugin) executeThreadConversation(
 		Status:        "completed",
 		Output:        output,
 	}, nil
+}
+
+func progressPost(progress *botProgressPost) *model.Post {
+	if progress == nil {
+		return nil
+	}
+	return progress.post
+}
+
+func (p *Plugin) finalizeExecutionFailure(
+	cfg *runtimeConfiguration,
+	request BotRunRequest,
+	account botAccount,
+	channel *model.Channel,
+	progress *botProgressPost,
+	correlationID string,
+	prompt string,
+	failure executionFailureView,
+	startedAt time.Time,
+) {
+	record := newExecutionRecord(request, account.Definition, correlationID, "failed", strings.TrimSpace(prompt), failure.Message, failure.ErrorCode, failure.Retryable, startedAt, time.Now())
+	p.appendExecutionHistory(request.UserID, record)
+	if cfg != nil {
+		p.logUsage(cfg, correlationID, request, account.Definition, "failed", failure.Message)
+	}
+	if channel == nil {
+		return
+	}
+	if _, postErr := p.postFailure(channel, request.RootID, account, progressPost(progress), correlationID, failure); postErr != nil {
+		p.API.LogError("Failed to post Doc2VLLM failure response", "error", postErr, "correlation_id", correlationID)
+	}
+}
+
+func shouldStreamInitialOCR(cfg *runtimeConfiguration, bot BotDefinition, preparedInputs []preparedOCRInput, processingFailures []documentProcessingFailure) bool {
+	if cfg == nil || !cfg.EnableStreaming || bot.shouldUseVLLMForPostProcess() || len(preparedInputs) != 1 || len(processingFailures) > 0 {
+		return false
+	}
+	return preparedInputs[0].DirectResult == nil
+}
+
+func buildPreparedInputStatus(preparedInputs []preparedOCRInput) string {
+	if len(preparedInputs) == 0 {
+		return "처리할 입력을 찾지 못했습니다."
+	}
+
+	directCount := 0
+	ocrCount := 0
+	for _, preparedInput := range preparedInputs {
+		if preparedInput.DirectResult != nil {
+			directCount++
+		} else {
+			ocrCount++
+		}
+	}
+
+	parts := []string{fmt.Sprintf("처리 대상 %d개를 준비했습니다.", len(preparedInputs))}
+	if ocrCount > 0 {
+		parts = append(parts, fmt.Sprintf("OCR 모델 호출 %d건", ocrCount))
+	}
+	if directCount > 0 {
+		parts = append(parts, fmt.Sprintf("직접 텍스트 추출 %d건", directCount))
+	}
+	return strings.Join(parts, " | ")
 }
 
 func buildDocumentResponseOutput(mode, prompt string, results []doc2vllmDocumentResult, failures []documentProcessingFailure, maxLength int) string {
@@ -826,11 +1036,7 @@ func (p *Plugin) ensureBotInChannel(channelID, botUserID string) error {
 	return nil
 }
 
-func (p *Plugin) postSuccess(channel *model.Channel, rootID string, account botAccount, correlationID, output string, debugView successDebugView, apiDuration time.Duration) (*model.Post, error) {
-	if err := p.ensureBotInChannel(channel.Id, account.UserID); err != nil {
-		return nil, err
-	}
-
+func (p *Plugin) postSuccess(channel *model.Channel, rootID string, account botAccount, existing *model.Post, correlationID, output string, debugView successDebugView, apiDuration time.Duration) (*model.Post, error) {
 	props := map[string]any{
 		"from_bot":                 "true",
 		"doc2vllm_bot_id":          account.Definition.ID,
@@ -845,19 +1051,7 @@ func (p *Plugin) postSuccess(channel *model.Channel, rootID string, account botA
 	if strings.TrimSpace(debugView.Output) != "" {
 		props["doc2vllm_response_output"] = debugView.Output
 	}
-
-	post, appErr := p.API.CreatePost(&model.Post{
-		UserId:    account.UserID,
-		ChannelId: channel.Id,
-		RootId:    rootID,
-		Type:      doc2vllmBotPostType,
-		Message:   buildBotResponseMessage(output, correlationID, apiDuration),
-		Props:     props,
-	})
-	if appErr != nil {
-		return nil, fmt.Errorf("failed to create Doc2VLLM response post: %w", appErr)
-	}
-	return post, nil
+	return p.upsertBotPost(channel, rootID, account, existing, buildBotResponseMessage(output, correlationID, apiDuration), props)
 }
 
 func buildVLLMFallbackOutput(documentContext, notice string) string {
@@ -869,34 +1063,19 @@ func buildVLLMFallbackOutput(documentContext, notice string) string {
 	return strings.TrimSpace(strings.Join(parts, "\n"))
 }
 
-func (p *Plugin) postFailure(channel *model.Channel, rootID string, account botAccount, correlationID string, failure executionFailureView) error {
-	if err := p.ensureBotInChannel(channel.Id, account.UserID); err != nil {
-		return err
-	}
-
-	_, appErr := p.API.CreatePost(&model.Post{
-		UserId:    account.UserID,
-		ChannelId: channel.Id,
-		RootId:    rootID,
-		Type:      doc2vllmBotPostType,
-		Message:   buildBotFailureMessage(account.Definition, correlationID, failure),
-		Props: map[string]any{
-			"from_bot":                 "true",
-			"doc2vllm_bot_id":          account.Definition.ID,
-			"doc2vllm_correlation_id":  correlationID,
-			"doc2vllm_api_duration_ms": failure.APIDuration.Milliseconds(),
-			"doc2vllm_model":           account.Definition.Model,
-			"doc2vllm_error":           "true",
-			"doc2vllm_error_code":      failure.ErrorCode,
-			"doc2vllm_error_input":     failure.InputDebug,
-			"doc2vllm_error_output":    failure.OutputDebug,
-			"doc2vllm_ocr":             "true",
-		},
+func (p *Plugin) postFailure(channel *model.Channel, rootID string, account botAccount, existing *model.Post, correlationID string, failure executionFailureView) (*model.Post, error) {
+	return p.upsertBotPost(channel, rootID, account, existing, buildBotFailureMessage(account.Definition, correlationID, failure), map[string]any{
+		"from_bot":                 "true",
+		"doc2vllm_bot_id":          account.Definition.ID,
+		"doc2vllm_correlation_id":  correlationID,
+		"doc2vllm_api_duration_ms": failure.APIDuration.Milliseconds(),
+		"doc2vllm_model":           account.Definition.Model,
+		"doc2vllm_error":           "true",
+		"doc2vllm_error_code":      failure.ErrorCode,
+		"doc2vllm_error_input":     failure.InputDebug,
+		"doc2vllm_error_output":    failure.OutputDebug,
+		"doc2vllm_ocr":             "true",
 	})
-	if appErr != nil {
-		return fmt.Errorf("failed to create Doc2VLLM error post: %w", appErr)
-	}
-	return nil
 }
 
 func (p *Plugin) postInstruction(channel *model.Channel, rootID string, account botAccount, message string) error {
