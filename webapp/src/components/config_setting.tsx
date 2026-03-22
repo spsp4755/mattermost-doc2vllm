@@ -1,5 +1,5 @@
 import manifest from 'manifest';
-import React, {useDeferredValue, useEffect, useMemo, useRef, useState} from 'react';
+import React, {useEffect, useMemo, useRef, useState} from 'react';
 
 import type {
     AdminPluginConfig,
@@ -194,7 +194,7 @@ export default function ConfigSetting(props: Props) {
     const [testing, setTesting] = useState(false);
     const last = useRef('');
     const saveTimer = useRef<number | null>(null);
-    const deferredConfig = useDeferredValue(config);
+    const [deferredConfig, setDeferredConfig] = useState(config);
 
     useEffect(() => {
         void loadConfig(props.value, last, setConfig, setSource, setSelected, setLoadingConfig, setError);
@@ -211,6 +211,14 @@ export default function ConfigSetting(props: Props) {
             }
         };
     }, []);
+
+    useEffect(() => {
+        const timer = window.setTimeout(() => {
+            setDeferredConfig(config);
+        }, 75);
+
+        return () => window.clearTimeout(timer);
+    }, [config]);
 
     const bot = useMemo(() => config.bots.find((item) => item.local_id === selected) || config.bots[0] || null, [config.bots, selected]);
     const messages = useMemo(() => validate(deferredConfig), [deferredConfig]);
