@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"bytes"
@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -1037,14 +1038,15 @@ func isLikelyTextKey(key string) bool {
 }
 
 func truncateString(value string, maxLength int) string {
-	value = strings.TrimSpace(value)
-	if maxLength <= 0 || len(value) <= maxLength {
+	value = strings.TrimSpace(strings.ToValidUTF8(value, ""))
+	if maxLength <= 0 || utf8.RuneCountInString(value) <= maxLength {
 		return value
 	}
+	runes := []rune(value)
 	if maxLength <= 3 {
-		return value[:maxLength]
+		return string(runes[:maxLength])
 	}
-	return value[:maxLength-3] + "..."
+	return string(runes[:maxLength-3]) + "..."
 }
 
 func minDuration(values ...time.Duration) time.Duration {
@@ -1232,7 +1234,7 @@ func marshalDebugPayload(payload any) string {
 	if err != nil {
 		return ""
 	}
-	return string(raw)
+	return truncateString(string(raw), 16*1024)
 }
 
 func marshalDoc2VLLMRequestDebugs(requestDebugs []doc2vllmRequestDebug) string {
@@ -1469,4 +1471,3 @@ func firstHeaderValue(headers http.Header, keys ...string) string {
 	}
 	return ""
 }
-

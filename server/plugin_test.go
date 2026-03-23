@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/stretchr/testify/require"
@@ -689,6 +690,33 @@ func TestBuildBotFailureMessageIncludesAPIDuration(t *testing.T) {
 
 	require.Contains(t, message, "_Correlation ID:_ `corr-123`")
 	require.Contains(t, message, "_Doc2VLLM API 응답 시간:_ `12.8초`")
+}
+
+func TestTruncateStringPreservesValidUTF8(t *testing.T) {
+	result := truncateString("가나다라마바사", 5)
+
+	require.True(t, utf8.ValidString(result))
+	require.Equal(t, "가나...", result)
+}
+
+func TestSanitizeBotPostPayloadKeepsMattermostSafeSizes(t *testing.T) {
+	message := strings.Repeat("가", model.PostMessageMaxRunesV2+500)
+	props := map[string]any{
+		"from_bot":                 "true",
+		"doc2vllm_bot_id":          "ocr-bot",
+		"doc2vllm_correlation_id":  "corr-123",
+		"doc2vllm_model":           "Qwen3.5-27B-FP8",
+		"doc2vllm_ocr":             "true",
+		"doc2vllm_request_input":   strings.Repeat("요청", 50000),
+		"doc2vllm_response_output": strings.Repeat("응답", 50000),
+	}
+
+	safeMessage, safeProps := sanitizeBotPostPayload(message, props)
+
+	require.True(t, utf8.ValidString(safeMessage))
+	require.LessOrEqual(t, utf8.RuneCountInString(safeMessage), mattermostSafePostMessageRunes)
+	require.LessOrEqual(t, countPostPropsRunes(safeProps), mattermostSafePostPropsRunes)
+	require.Contains(t, safeProps, "from_bot")
 }
 
 func TestExtractTextFromBody(t *testing.T) {
