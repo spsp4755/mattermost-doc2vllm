@@ -477,7 +477,7 @@ func (p *Plugin) executeThreadConversation(
 		response := doc2vllmOCRResponse{}
 		requestDebug := doc2vllmRequestDebug{}
 		var invokeErr error
-		if cfg.EnableStreaming {
+		if shouldUseDoc2VLLMStreaming(cfg, bot) {
 			response, requestDebug, apiDuration, _, invokeErr = p.invokeDoc2VLLMConversationStream(
 				ctx,
 				serviceConfig,
@@ -608,10 +608,21 @@ func (p *Plugin) finalizeExecutionFailure(
 }
 
 func shouldStreamInitialOCR(cfg *runtimeConfiguration, bot BotDefinition, preparedInputs []preparedOCRInput, processingFailures []documentProcessingFailure) bool {
-	if cfg == nil || !cfg.EnableStreaming || bot.shouldUseVLLMForPostProcess() || len(preparedInputs) != 1 || len(processingFailures) > 0 {
+	if !shouldUseDoc2VLLMStreaming(cfg, bot) || bot.shouldUseVLLMForPostProcess() || len(preparedInputs) != 1 || len(processingFailures) > 0 {
 		return false
 	}
 	return preparedInputs[0].DirectResult == nil
+}
+
+func shouldUseDoc2VLLMStreaming(cfg *runtimeConfiguration, bot BotDefinition) bool {
+	if cfg == nil || !cfg.EnableStreaming {
+		return false
+	}
+
+	// Multimodal OCR endpoints often advertise OpenAI compatibility but do not
+	// stream partial tokens reliably. For those bots, keep progress updates but
+	// use the stable non-streaming request path for the model call itself.
+	return bot.effectiveMode() != "multimodal"
 }
 
 func buildPreparedInputStatus(preparedInputs []preparedOCRInput) string {
@@ -1052,7 +1063,7 @@ func (p *Plugin) postSuccess(channel *model.Channel, rootID string, account botA
 	if strings.TrimSpace(debugView.Output) != "" {
 		props["doc2vllm_response_output"] = debugView.Output
 	}
-	return p.upsertBotPost(channel, rootID, account, existing, buildBotResponseMessage(output, correlationID, apiDuration), props)
+	return p.upsertBotPost(channel, rootID, account, nil, buildBotResponseMessage(output, correlationID, apiDuration), props)
 }
 
 func buildVLLMFallbackOutput(documentContext, notice string) string {
@@ -1065,7 +1076,7 @@ func buildVLLMFallbackOutput(documentContext, notice string) string {
 }
 
 func (p *Plugin) postFailure(channel *model.Channel, rootID string, account botAccount, existing *model.Post, correlationID string, failure executionFailureView) (*model.Post, error) {
-	return p.upsertBotPost(channel, rootID, account, existing, buildBotFailureMessage(account.Definition, correlationID, failure), map[string]any{
+	return p.upsertBotPost(channel, rootID, account, nil, buildBotFailureMessage(account.Definition, correlationID, failure), map[string]any{
 		"from_bot":                 "true",
 		"doc2vllm_bot_id":          account.Definition.ID,
 		"doc2vllm_correlation_id":  correlationID,

@@ -160,6 +160,18 @@ func TestBuildDoc2VLLMRequestBodyIncludesStream(t *testing.T) {
 	require.Equal(t, true, body["stream"])
 }
 
+func TestShouldUseDoc2VLLMStreamingDisablesMultimodalBots(t *testing.T) {
+	cfg := &runtimeConfiguration{EnableStreaming: true}
+
+	ocrBot, err := (BotDefinition{Username: "ocr-bot", Mode: "ocr"}).normalize()
+	require.NoError(t, err)
+	require.True(t, shouldUseDoc2VLLMStreaming(cfg, ocrBot))
+
+	multimodalBot, err := (BotDefinition{Username: "qwen-bot", Mode: "multimodal"}).normalize()
+	require.NoError(t, err)
+	require.False(t, shouldUseDoc2VLLMStreaming(cfg, multimodalBot))
+}
+
 func TestConfigurationNormalizeAutoAllowsConfiguredBotAndRefinerHosts(t *testing.T) {
 	cfg := &configuration{
 		Config: `{
