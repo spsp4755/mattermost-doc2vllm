@@ -41,7 +41,13 @@ func (p *Plugin) newBotProgressPost(channel *model.Channel, rootID string, accou
 		updateEvery:   updateEvery,
 	}
 
-	initialMessage := buildBotProgressMessage("요청 접수", "첨부 파일과 입력 내용을 확인하고 있습니다.", "", correlationID, time.Since(startedAt))
+	initialMessage := buildBotProgressMessage(
+		"\uc694\uccad \uc811\uc218",
+		"\ucca8\ubd80 \ud30c\uc77c\uacfc \uc785\ub825 \ub0b4\uc6a9\uc744 \ud655\uc778\ud558\uace0 \uc788\uc2b5\ub2c8\ub2e4.",
+		"",
+		correlationID,
+		time.Since(startedAt),
+	)
 	post, err := p.upsertBotPost(channel, rootID, account, nil, initialMessage, map[string]any{
 		"from_bot":                "true",
 		"doc2vllm_bot_id":         account.Definition.ID,
@@ -68,26 +74,36 @@ func (p *Plugin) upsertBotPost(channel *model.Channel, rootID string, account bo
 
 	message = strings.TrimSpace(message)
 	if message == "" {
-		message = "_빈 응답이 반환되었습니다._"
+		message = "_\ube48 \uc751\ub2f5\uc774 \ubc18\ud658\ub418\uc5c8\uc2b5\ub2c8\ub2e4._"
 	}
 
 	if existing == nil || existing.Id == "" {
-		post, appErr := p.API.CreatePost(&model.Post{
-			UserId:    account.UserID,
-			ChannelId: channel.Id,
-			RootId:    rootID,
-			Type:      doc2vllmBotPostType,
-			Message:   message,
-			Props:     props,
-		})
-		if appErr != nil {
-			return nil, fmt.Errorf("failed to create Doc2VLLM post: %w", appErr)
-		}
-		return post, nil
+		return p.createBotPost(channel, rootID, account, message, props)
 	}
 
-	post, appErr := p.API.UpdatePost(&model.Post{
-		Id:        existing.Id,
+	postForUpdate, appErr := p.API.GetPost(existing.Id)
+	if appErr != nil {
+		p.API.LogWarn("Failed to load existing Doc2VLLM post before update; creating a new post instead", "post_id", existing.Id, "error", appErr.Error())
+		return p.createBotPost(channel, rootID, account, message, props)
+	}
+
+	postForUpdate.UserId = account.UserID
+	postForUpdate.ChannelId = channel.Id
+	postForUpdate.RootId = rootID
+	postForUpdate.Type = doc2vllmBotPostType
+	postForUpdate.Message = message
+	postForUpdate.Props = props
+
+	post, appErr := p.API.UpdatePost(postForUpdate)
+	if appErr != nil {
+		p.API.LogWarn("Failed to update Doc2VLLM post; creating a new post instead", "post_id", existing.Id, "error", appErr.Error())
+		return p.createBotPost(channel, rootID, account, message, props)
+	}
+	return post, nil
+}
+
+func (p *Plugin) createBotPost(channel *model.Channel, rootID string, account botAccount, message string, props map[string]any) (*model.Post, error) {
+	post, appErr := p.API.CreatePost(&model.Post{
 		UserId:    account.UserID,
 		ChannelId: channel.Id,
 		RootId:    rootID,
@@ -96,7 +112,7 @@ func (p *Plugin) upsertBotPost(channel *model.Channel, rootID string, account bo
 		Props:     props,
 	})
 	if appErr != nil {
-		return nil, fmt.Errorf("failed to update Doc2VLLM post: %w", appErr)
+		return nil, fmt.Errorf("failed to create Doc2VLLM post: %w", appErr)
 	}
 	return post, nil
 }
@@ -149,10 +165,10 @@ func buildBotProgressMessage(stage, detail, partial, correlationID string, elaps
 	partial = truncateString(partial, 6000)
 
 	if detail == "" {
-		detail = "요청을 처리하고 있습니다."
+		detail = "\uc694\uccad\uc744 \ucc98\ub9ac\ud558\uace0 \uc788\uc2b5\ub2c8\ub2e4."
 	}
 	if stage == "" {
-		stage = "처리 중"
+		stage = "\ucc98\ub9ac \uc911"
 	}
 
 	lines := make([]string, 0, 8)
@@ -162,8 +178,8 @@ func buildBotProgressMessage(stage, detail, partial, correlationID string, elaps
 	lines = append(lines,
 		fmt.Sprintf("_%s_", detail),
 		"",
-		fmt.Sprintf("- 상태: `%s`", stage),
-		fmt.Sprintf("- 경과 시간: `%s`", formatDoc2VLLMAPIDuration(elapsed)),
+		fmt.Sprintf("- \uc0c1\ud0dc: `%s`", stage),
+		fmt.Sprintf("- \uacbd\uacfc \uc2dc\uac04: `%s`", formatDoc2VLLMAPIDuration(elapsed)),
 		fmt.Sprintf("- Correlation ID: `%s`", correlationID),
 	)
 	return strings.TrimSpace(strings.Join(lines, "\n"))

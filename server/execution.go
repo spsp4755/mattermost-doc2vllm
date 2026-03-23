@@ -173,9 +173,9 @@ func (p *Plugin) executeBotAndPost(ctx context.Context, request BotRunRequest) (
 		_ = p.updateProgressPost(progress, fmt.Sprintf("OCR 실행 %d/%d", index+1, len(preparedInputs)), fmt.Sprintf("%s 파일을 OCR 모델로 분석하고 있습니다.", attachment.Name), "", startedAt, true)
 
 		var (
-			result doc2vllmDocumentResult
+			result      doc2vllmDocumentResult
 			apiDuration time.Duration
-			invokeErr error
+			invokeErr   error
 		)
 		if shouldStreamInitialOCR(cfg, *bot, preparedInputs, processingFailures) {
 			result, _, apiDuration, invokeErr = p.invokeDoc2VLLMOCRStream(ctx, serviceConfig, *bot, attachment, prompt, correlationID, func(content string) error {
@@ -965,9 +965,7 @@ func (p *Plugin) ensureSingleBot(definition BotDefinition) (string, string, erro
 			return existingUser.Id, statusMessage, nil
 		}
 
-		statusMessage = "기존 봇 사용자 계정을 연결했습니다. Bot 메타데이터 조회는 실패했지만 메시지 전송은 계속 시도합니다."
-		p.API.LogWarn("Linked Doc2VLLM bot user without bot metadata", "bot_username", definition.Username, "user_id", existingUser.Id)
-		return existingUser.Id, statusMessage, nil
+		return "", "", missingBotMetadataError(definition.Username)
 	}
 
 	if appErr != nil && appErr.StatusCode != http.StatusNotFound {
@@ -982,8 +980,11 @@ func (p *Plugin) ensureSingleBot(definition BotDefinition) (string, string, erro
 	if err := p.client.Bot.Create(newBot); err != nil {
 		existingUser, existingErr := p.API.GetUserByUsername(definition.Username)
 		if existingErr == nil && existingUser != nil && existingUser.IsBot {
-			p.API.LogWarn("Recovered Doc2VLLM bot by linking an already existing bot user", "bot_username", definition.Username, "user_id", existingUser.Id, "error", err.Error())
-			return existingUser.Id, "이미 존재하는 봇 사용자 계정에 연결했습니다.", nil
+			if _, getErr := p.client.Bot.Get(existingUser.Id, true); getErr == nil {
+				p.API.LogWarn("Recovered Doc2VLLM bot by linking an already existing bot user", "bot_username", definition.Username, "user_id", existingUser.Id, "error", err.Error())
+				return existingUser.Id, "\uc774\ubbf8 \uc874\uc7ac\ud558\ub294 Mattermost \ubd07 \uacc4\uc815\uc744 \ub2e4\uc2dc \uc5f0\uacb0\ud588\uc2b5\ub2c8\ub2e4.", nil
+			}
+			return "", "", missingBotMetadataError(definition.Username)
 		}
 		return "", "", fmt.Errorf("failed to create Doc2VLLM bot @%s: %w", definition.Username, err)
 	}
@@ -1273,6 +1274,10 @@ func isBotNotFoundError(err error) bool {
 	return strings.Contains(lower, "resource bot not found") ||
 		strings.Contains(lower, "bot does not exist") ||
 		strings.Contains(lower, "unable to get bot")
+}
+
+func missingBotMetadataError(username string) error {
+	return fmt.Errorf("Mattermost bot metadata for @%s is missing. Remove the stale bot account or choose a new username in the plugin settings, then save again", username)
 }
 
 func joinSyncIssues(issues []string) string {
