@@ -220,7 +220,7 @@ export default function ConfigSetting(props: Props) {
         return () => window.clearTimeout(timer);
     }, [config]);
 
-    const bot = useMemo(() => config.bots.find((item) => item.local_id === selected) || config.bots[0] || null, [config.bots, selected]);
+    const bot = useMemo(() => config.bots.find((item) => selectionKey(item) === selected) || config.bots[0] || null, [config.bots, selected]);
     const messages = useMemo(() => validate(deferredConfig), [deferredConfig]);
     const preview = useMemo(() => showPreview ? serialize(buildConfig(deferredConfig)) : '', [deferredConfig, showPreview]);
     const managedBots = status?.managed_bots || status?.bot_sync?.entries || [];
@@ -242,19 +242,23 @@ export default function ConfigSetting(props: Props) {
 
     const updateService = (patch: Partial<DraftConfig['service']>) => apply({...config, service: {...config.service, ...patch}});
     const updateRuntime = (patch: Partial<DraftConfig['runtime']>) => apply({...config, runtime: {...config.runtime, ...patch}});
-    const updateBot = (botId: string, patch: Partial<DraftBot>) => apply({...config, bots: config.bots.map((item) => item.local_id === botId ? {...item, ...patch} : item)}, botId);
+    const updateBot = (botId: string, patch: Partial<DraftBot>) => {
+        const bots = config.bots.map((item) => item.local_id === botId ? {...item, ...patch} : item);
+        const nextBot = bots.find((item) => item.local_id === botId);
+        apply({...config, bots}, nextBot ? selectionKey(nextBot) : undefined);
+    };
     const addBot = () => {
         const next = emptyBot(config.bots, config.runtime.mask_sensitive_data);
-        apply({...config, bots: [...config.bots, next]}, next.local_id);
+        apply({...config, bots: [...config.bots, next]}, selectionKey(next));
     };
     const loadSamples = () => {
         const bots = sampleBots.map((item, index) => normalizeBot(item, index, config.runtime.mask_sensitive_data));
-        apply({...config, bots}, bots[0]?.local_id);
+        apply({...config, bots}, bots[0] ? selectionKey(bots[0]) : '');
     };
     const duplicateBot = (current: DraftBot) => {
         const identity = nextBotIdentity(config.bots);
         const next: DraftBot = {...current, local_id: id('bot'), bot_id: identity.id, username: identity.username, display_name: `${current.display_name || 'Bot'} Copy`, allowed_teams: [...current.allowed_teams], allowed_channels: [...current.allowed_channels], allowed_users: [...current.allowed_users]};
-        apply({...config, bots: [...config.bots, next]}, next.local_id);
+        apply({...config, bots: [...config.bots, next]}, selectionKey(next));
     };
     const removeBot = (botId: string) => apply({...config, bots: config.bots.filter((item) => item.local_id !== botId)});
     const updateUsername = (current: DraftBot, rawValue: string) => {
@@ -364,7 +368,7 @@ export default function ConfigSetting(props: Props) {
                     <div style={{display: 'flex', flexDirection: 'column', gap: 8}}>
                         {config.bots.length === 0 && <div style={box}>{T.noBots}</div>}
                         {config.bots.map((item) => (
-                            <button key={item.local_id} type='button' onClick={() => setSelected(item.local_id)} style={{...botButton, borderColor: bot?.local_id === item.local_id ? 'rgba(var(--button-bg-rgb),.45)' : 'rgba(var(--center-channel-color-rgb),.08)'}}>
+                        <button key={item.local_id} type='button' onClick={() => setSelected(selectionKey(item))} style={{...botButton, borderColor: bot?.local_id === item.local_id ? 'rgba(var(--button-bg-rgb),.45)' : 'rgba(var(--center-channel-color-rgb),.08)'}}>
                                 <strong>{item.display_name || '@new-bot'}</strong>
                                 <div>{`@${item.username || 'username'}`}</div>
                                 <div style={note}>{`${item.model || defaultModel} | ${modeLabel(item.mode)} | ${item.output_mode} | temp=${item.temperature} | max_tokens=${item.max_tokens}`}</div>
@@ -778,11 +782,15 @@ function nextBotIdentity(existingBots: DraftBot[], start = 1): {id: string; user
     }
 }
 
-function pickBot(bots: DraftBot[], current: string): string {
-    if (bots.some((item) => item.local_id === current)) {
+export function pickBot(bots: DraftBot[], current: string): string {
+    if (bots.some((item) => selectionKey(item) === current)) {
         return current;
     }
-    return bots[0]?.local_id || '';
+    return bots[0] ? selectionKey(bots[0]) : '';
+}
+
+export function selectionKey(bot: DraftBot): string {
+    return text(bot.bot_id) || text(bot.username) || bot.local_id;
 }
 
 function modeLabel(value: string): string {

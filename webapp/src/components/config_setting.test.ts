@@ -2,7 +2,7 @@ import type {Dispatch, SetStateAction} from 'react';
 
 import type {AdminPluginConfig} from '../client';
 import {getAdminConfig} from '../client';
-import {buildConfig, draftUsername, loadConfig, normalizeConfig} from './config_setting';
+import {buildConfig, draftUsername, loadConfig, normalizeConfig, pickBot, selectionKey} from './config_setting';
 
 jest.mock('manifest', () => ({
     __esModule: true,
@@ -163,5 +163,33 @@ describe('loadConfig', () => {
         const built = buildConfig(config);
 
         expect(built.bots[0].username).toBe('qwen');
+    });
+
+    test('keeps the selected bot after the config round-trips through props.value', () => {
+        const config = normalizeConfig({
+            ...draftConfig,
+            bots: [
+                draftConfig.bots[0],
+                {
+                    ...draftConfig.bots[0],
+                    id: 'doc2vllm-bot-2',
+                    username: 'doc2vllm-bot-2',
+                    display_name: 'Bot 2',
+                },
+                {
+                    ...draftConfig.bots[0],
+                    id: 'doc2vllm-bot-3',
+                    username: '',
+                    display_name: '',
+                    model: '',
+                },
+            ],
+        });
+        config.bots[2].local_id = 'temp-local-3';
+
+        const built = buildConfig(config);
+        const roundTripped = normalizeConfig(built);
+
+        expect(pickBot(roundTripped.bots, selectionKey(config.bots[2]))).toBe(selectionKey(roundTripped.bots[2]));
     });
 });
