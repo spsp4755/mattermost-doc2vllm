@@ -1,17 +1,14 @@
 # Local Testing Setup
 
-This workspace is prepared to test the Mattermost Doc2VLLM plugin locally on Windows.
+This workspace is prepared to build and test the Mattermost LLM plugin locally on Windows.
 
 ## Installed Toolchains
 
 - Go: `C:\Users\USER\Documents\Playground\tools\go`
 - Node.js/npm: `C:\Users\USER\Documents\Playground\tools\node`
-- Python (general): `C:\Users\USER\Documents\Playground\tools\python313`
-- Python (HunyuanOCR-pinned): `C:\Users\USER\Documents\Playground\tools\python313-hunyuan`
+- Python: `C:\Users\USER\Documents\Playground\tools\python313`
 
-## Plugin Checks
-
-Server tests:
+## Server Checks
 
 ```powershell
 $env:GOCACHE='C:\Users\USER\Documents\Playground\repo\.codex-cache\go-build'
@@ -19,79 +16,49 @@ $env:GOMODCACHE='C:\Users\USER\Documents\Playground\repo\.codex-cache\go-mod'
 & 'C:\Users\USER\Documents\Playground\tools\go\bin\go.exe' test ./server/...
 ```
 
-Webapp type check:
+## Webapp Checks
+
+Type check:
 
 ```powershell
 $env:npm_config_cache='C:\Users\USER\Documents\Playground\repo\.codex-cache\npm'
 & 'C:\Users\USER\Documents\Playground\tools\node\npm.cmd' run check-types
 ```
 
-Webapp tests:
+Tests:
 
 ```powershell
 $env:npm_config_cache='C:\Users\USER\Documents\Playground\repo\.codex-cache\npm'
 & 'C:\Users\USER\Documents\Playground\tools\node\npm.cmd' test -- --runInBand
 ```
 
-Webapp build:
+Build:
 
 ```powershell
 $env:npm_config_cache='C:\Users\USER\Documents\Playground\repo\.codex-cache\npm'
 & 'C:\Users\USER\Documents\Playground\tools\node\npm.cmd' run build
 ```
 
-Server build:
+## Full Bundle Build
 
 ```powershell
 $env:GOCACHE='C:\Users\USER\Documents\Playground\repo\.codex-cache\go-build'
 $env:GOMODCACHE='C:\Users\USER\Documents\Playground\repo\.codex-cache\go-mod'
+$env:npm_config_cache='C:\Users\USER\Documents\Playground\repo\.codex-cache\npm'
 & 'C:\Users\USER\Documents\Playground\tools\go\bin\go.exe' run ./build/manifest apply
-Push-Location server
-& 'C:\Users\USER\Documents\Playground\tools\go\bin\go.exe' build -trimpath -o dist\plugin-windows-amd64.exe
+& 'C:\Users\USER\Documents\Playground\tools\go\bin\go.exe' test ./server/...
+Push-Location webapp
+& 'C:\Users\USER\Documents\Playground\tools\node\npm.cmd' run check-types
+& 'C:\Users\USER\Documents\Playground\tools\node\npm.cmd' test -- --runInBand
+& 'C:\Users\USER\Documents\Playground\tools\node\npm.cmd' run build
 Pop-Location
+& 'C:\Users\USER\Documents\Playground\tools\go\bin\go.exe' build -trimpath -o server\dist\plugin-windows-amd64.exe .\server
 ```
 
-## OCR Model Smoke Tests
+## Offline / Closed-Network Validation
 
-The smoke test creates a synthetic image and runs OCR locally against the GPU.
-
-Run all three:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\run_ocr_smoke_tests.ps1
-```
-
-This wrapper uses `--local-files-only`, so after the first successful downloads it can rerun fully from cache.
-
-Run one model:
-
-```powershell
-$env:HF_HOME='C:\Users\USER\Documents\Playground\repo\.hf-cache'
-& 'C:\Users\USER\Documents\Playground\tools\python313\python.exe' .\scripts\ocr_model_smoke_test.py --model glm-ocr
-& 'C:\Users\USER\Documents\Playground\tools\python313\python.exe' .\scripts\ocr_model_smoke_test.py --model paddleocr-vl-1.5
-& 'C:\Users\USER\Documents\Playground\tools\python313-hunyuan\Scripts\python.exe' .\scripts\ocr_model_smoke_test.py --model hunyuanocr
-```
-
-Korean smoke test example:
-
-```powershell
-$env:HF_HOME='C:\Users\USER\Documents\Playground\repo\.hf-cache'
-& 'C:\Users\USER\Documents\Playground\tools\python313\python.exe' .\scripts\ocr_model_smoke_test.py --model glm-ocr --locale ko
-```
-
-Offline rerun from cache:
-
-```powershell
-$env:HF_HOME='C:\Users\USER\Documents\Playground\repo\.hf-cache'
-& 'C:\Users\USER\Documents\Playground\tools\python313\python.exe' .\scripts\ocr_model_smoke_test.py --model glm-ocr --local-files-only
-& 'C:\Users\USER\Documents\Playground\tools\python313\python.exe' .\scripts\ocr_model_smoke_test.py --model paddleocr-vl-1.5 --local-files-only
-& 'C:\Users\USER\Documents\Playground\tools\python313-hunyuan\Scripts\python.exe' .\scripts\ocr_model_smoke_test.py --model hunyuanocr --local-files-only
-```
-
-Outputs are written to `artifacts/ocr-smoke/*.json`.
-
-## Notes
-
-- `GLM-OCR` and `PaddleOCR-VL-1.5` worked in the main Python environment with the latest `transformers` main branch.
-- `HunyuanOCR` required a separate Python environment pinned to the model card's recommended `transformers` commit.
-- Model downloads are cached under `.hf-cache`.
+- Build the plugin bundle once in this workspace.
+- Verify the final runtime bundle is `dist\com.mattermost.vllm-llm-<version>.tar.gz`.
+- Deploy that tarball into Mattermost in the target closed network.
+- Ensure the configured LLM endpoint is reachable from inside the closed network.
+- If scanned PDFs must be supported, install one of the documented PDF rasterizers on the Mattermost plugin host.

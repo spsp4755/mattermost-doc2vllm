@@ -11,7 +11,7 @@ import type {
 import {getAdminConfig, getStatus, testConnection} from '../client';
 
 const defaultURL = 'http://localhost:8000/v1/chat/completions';
-const defaultModel = 'doc2vllm-ocr';
+const defaultModel = 'Qwen/Qwen2.5-7B-Instruct';
 const defaultMultimodalModel = 'Qwen/Qwen2.5-VL-7B-Instruct';
 
 const stack: React.CSSProperties = {display: 'flex', flexDirection: 'column', gap: 16};
@@ -27,7 +27,7 @@ const codeStyle: React.CSSProperties = {margin: 0, fontSize: 12, lineHeight: 1.5
 
 const T = {
     title: '\uad00\ub9ac\uc790 \uc124\uc815',
-    intro: '\ud55c\uad6d\uc5b4 \ud658\uacbd\uc5d0\uc11c \ubc14\ub85c \uc4f8 \uc218 \uc788\ub3c4\ub85d OCR/\uba40\ud2f0\ubaa8\ub2ec \uc124\uc815 \ud654\uba74\uc744 \uc815\ub9ac\ud588\uc2b5\ub2c8\ub2e4.',
+    intro: '\ud14d\uc2a4\ud2b8 \ub300\ud654, \uba40\ud2f0\ubaa8\ub2ec \ubd84\uc11d, \ubb38\uc11c \ucd94\ucd9c\uc744 \ud55c \ud50c\ub7ec\uadf8\uc778\uc5d0\uc11c \uad00\ub9ac\ud560 \uc218 \uc788\ub3c4\ub85d \ubc94\uc6a9 LLM \uc124\uc815 \ud654\uba74\uc73c\ub85c \uc815\ub9ac\ud588\uc2b5\ub2c8\ub2e4.',
     botTip1: '\uc0c8 \ubd07\uc744 \ucd94\uac00\ud558\uba74 \ube48 \uc785\ub825 \uc0c1\ud0dc\ub85c \uc2dc\uc791\ud558\ubbc0\ub85c \ud544\uc694\ud55c \uac12\ub9cc \uc9c1\uc811 \uc785\ub825\ud558\uba74 \ub429\ub2c8\ub2e4.',
     botTip2: '\uc22b\uc790 \ud30c\ub77c\ubbf8\ud130\ub294 \ubaa8\ub450 \uc9c1\uc811 \uc785\ub825\ud558\ub294 \ud615\ud0dc\ub85c \uc720\uc9c0\ud588\uc2b5\ub2c8\ub2e4.',
     botTip3: '\uc124\uc815 \uc800\uc7a5 \ud6c4 \uc0c1\ud0dc \uc0c8\ub85c\uace0\uce68\uc744 \ub204\ub974\uba74 Mattermost \ubd07 \uacc4\uc815 \ub4f1\ub85d \uc5ec\ubd80\ub97c \ud655\uc778\ud560 \uc218 \uc788\uc2b5\ub2c8\ub2e4.',
@@ -68,10 +68,11 @@ const T = {
     internalIdHelp: 'username\uc744 \uae30\uc900\uc73c\ub85c \uc790\ub3d9 \uad00\ub9ac\ub429\ub2c8\ub2e4.',
     model: '\ubaa8\ub378\uba85',
     mode: '\uc791\ub3d9 \ubc29\uc2dd',
+    chatMode: '\ud14d\uc2a4\ud2b8 \uc0dd\uc131 / \uc77c\ubc18 \ub300\ud654',
     ocrMode: 'OCR / \ucd94\ucd9c \uc911\uc2ec',
     multimodalMode: '\uba40\ud2f0\ubaa8\ub2ec / \uc2dc\uac01\uc5b8\uc5b4 \ubaa8\ub378',
     outputMode: '\ucd9c\ub825 \ud615\uc2dd',
-    systemPrompt: '\ucca8\ubd80 \ud30c\uc77c\uc6a9 System Prompt',
+    systemPrompt: 'System Prompt / \uc9c0\uc2dc \ud504\ub86c\ud504\ud2b8',
     extraJson: '\ucd94\uac00 \uc694\uccad \ud30c\ub77c\ubbf8\ud130(JSON)',
     botBaseUrl: '\ubd07 \uc804\uc6a9 URL',
     botBaseUrlHelp: '\ube44\uc6cc\ub450\uba74 \uae30\ubcf8 URL\uc744 \uadf8\ub300\ub85c \uc0ac\uc6a9\ud569\ub2c8\ub2e4.',
@@ -120,7 +121,7 @@ const T = {
     requiredGuide: '* \ud45c\uc2dc\ub294 \ud544\uc218 \uc785\ub825 \ud56d\ubaa9\uc785\ub2c8\ub2e4.',
     usernameHelp: '\ubd07 \ud638\ucd9c\uc6a9 username\uc785\ub2c8\ub2e4. \uacf5\ubc31\uc740 -\ub85c \ubcc0\ud658\ub429\ub2c8\ub2e4.',
     displayNameHelp: '\ube44\uc6cc \ub450\uba74 Mattermost\uc5d0\uc11c \uae30\ubcf8 \ud45c\uc2dc \uaddc\uce59\uc744 \ub530\ub985\ub2c8\ub2e4.',
-    modelHelp: '\ube44\uc6cc \ub450\uba74 \ud50c\ub7ec\uadf8\uc778 \uae30\ubcf8 \ubaa8\ub378(doc2vllm-ocr)\uc744 \uc0ac\uc6a9\ud569\ub2c8\ub2e4.',
+    modelHelp: '\ube44\uc6cc \ub450\uba74 \ud50c\ub7ec\uadf8\uc778 \uae30\ubcf8 \ubaa8\ub378(Qwen/Qwen2.5-7B-Instruct)\uc744 \uc0ac\uc6a9\ud569\ub2c8\ub2e4.',
 };
 
 type DraftBot = {
@@ -173,9 +174,9 @@ type Props = {
 type FieldProps = {label: string; help?: string; required?: boolean; children: React.ReactNode};
 
 const sampleBots: Partial<BotDefinition>[] = [
-    {id: 'doc2vllm-ocr', username: 'doc2vllm-ocr', display_name: '\ubb38\uc11c OCR \uae30\ubcf8', description: '\uc77c\ubc18 \ubb38\uc11c\uc5d0 \uc801\ud569\ud55c OCR \ubd07', model: defaultModel, mode: 'ocr', output_mode: 'markdown', ocr_prompt: '\ucca8\ubd80\ub41c \ubb38\uc11c\uc758 \ud14d\uc2a4\ud2b8\ub97c \uc6d0\ubb38\uc5d0 \ucda9\uc2e4\ud558\uac8c \ucd94\ucd9c\ud558\uc138\uc694.', temperature: 0, max_tokens: 2048, top_p: 1, repetition_penalty: 1, mask_sensitive_data: false},
-    {id: 'doc2vllm-table', username: 'doc2vllm-table', display_name: '\ud45c/\uc11c\uc2dd \ubb38\uc11c OCR', description: '\ud45c \uad6c\uc870\uac00 \uc911\uc694\ud55c \ubb38\uc11c\uc5d0 \uc801\ud569\ud55c OCR \ubd07', model: defaultModel, mode: 'ocr', output_mode: 'markdown', ocr_prompt: '\ud45c \uad6c\uc870\uac00 \uba85\ud655\ud558\uba74 \uc720\uc9c0\ud558\uace0 \ubd88\uba85\ud655\ud558\uba74 \uc6d0\ubb38 \uc21c\uc11c\ub300\ub85c \ucd9c\ub825\ud558\uc138\uc694.', temperature: 0, max_tokens: 3072, top_p: 1, repetition_penalty: 1, mask_sensitive_data: false},
-    {id: 'doc2vllm-qwen-vl', username: 'doc2vllm-qwen-vl', display_name: '\uba40\ud2f0\ubaa8\ub2ec \ubb38\uc11c \ubd84\uc11d', description: 'Qwen \uacc4\uc5f4 \uba40\ud2f0\ubaa8\ub2ec \ubaa8\ub378 \uc608\uc2dc', model: defaultMultimodalModel, mode: 'multimodal', output_mode: 'markdown', ocr_prompt: '\ucca8\ubd80\ub41c \uc774\ubbf8\uc9c0\ub098 \ubb38\uc11c\uc758 \ubcf4\uc774\ub294 \ub0b4\uc6a9\ub9cc \uadfc\uac70\ub85c \ub2f5\ud558\uc138\uc694.', temperature: 0, max_tokens: 3072, top_p: 1, repetition_penalty: 1, extra_request_json: '{"min_pixels":3136,"max_pixels":12845056}', mask_sensitive_data: false},
+    {id: 'mm-llm-chat', username: 'mm-llm-chat', display_name: '\uc77c\ubc18 \ub300\ud654 / \ud14d\uc2a4\ud2b8 \uc0dd\uc131', description: '\ud14d\uc2a4\ud2b8 \uc9c8\uc758\uc640 \ubb38\uc11c \uc694\uc57d\uc5d0 \uc801\ud569\ud55c \ubc94\uc6a9 \ubd07', model: defaultModel, mode: 'chat', output_mode: 'markdown', ocr_prompt: '\uc0ac\uc6a9\uc790 \uc694\uccad\uc744 \uba85\ud655\ud558\uac8c \uc218\ud589\ud558\uace0, \ud575\uc2ec \uc704\uc8fc\ub85c \uac04\uacb0\ud558\uac8c \ub2f5\ud558\uc138\uc694.', temperature: 0.2, max_tokens: 2048, top_p: 1, repetition_penalty: 1, mask_sensitive_data: false},
+    {id: 'mm-llm-qwen-vl', username: 'mm-llm-qwen-vl', display_name: '\uba40\ud2f0\ubaa8\ub2ec \ubd84\uc11d', description: 'Qwen \uacc4\uc5f4 \uba40\ud2f0\ubaa8\ub2ec \ubaa8\ub378 \uc608\uc2dc', model: defaultMultimodalModel, mode: 'multimodal', output_mode: 'markdown', ocr_prompt: '\ucca8\ubd80\ub41c \uc774\ubbf8\uc9c0\ub098 \ubb38\uc11c\uc758 \ubcf4\uc774\ub294 \ub0b4\uc6a9\ub9cc \uadfc\uac70\ub85c \ub2f5\ud558\uc138\uc694.', temperature: 0, max_tokens: 3072, top_p: 1, repetition_penalty: 1, extra_request_json: '{"min_pixels":3136,"max_pixels":12845056}', mask_sensitive_data: false},
+    {id: 'mm-llm-ocr', username: 'mm-llm-ocr', display_name: '\ubb38\uc11c OCR / \ucd94\ucd9c', description: '\uc6d0\ubb38 \ucda9\uc2e4\ub3c4\uac00 \uc911\uc694\ud55c \ubb38\uc11c \ucd94\ucd9c\uc6a9 \ubd07', model: defaultMultimodalModel, mode: 'ocr', output_mode: 'markdown', ocr_prompt: '\ucca8\ubd80\ub41c \ubb38\uc11c\uc758 \ud14d\uc2a4\ud2b8\ub97c \uc6d0\ubb38\uc5d0 \ucda9\uc2e4\ud558\uac8c \ucd94\ucd9c\ud558\uc138\uc694.', temperature: 0, max_tokens: 2048, top_p: 1, repetition_penalty: 1, mask_sensitive_data: false},
 ];
 
 export default function ConfigSetting(props: Props) {
@@ -403,6 +404,7 @@ export default function ConfigSetting(props: Props) {
                                     <Field label={T.model} help={T.modelHelp}><input disabled={disabled} style={field} value={bot.model} placeholder={defaultModel} onChange={(e) => updateBot(bot.local_id, {model: e.target.value})}/></Field>
                                     <Field label={T.mode}>
                                         <select disabled={disabled} style={field} value={bot.mode} onChange={(e) => updateBot(bot.local_id, {mode: normalizeMode(e.target.value)})}>
+                                            <option value='chat'>{T.chatMode}</option>
                                             <option value='ocr'>{T.ocrMode}</option>
                                             <option value='multimodal'>{T.multimodalMode}</option>
                                         </select>
@@ -767,7 +769,7 @@ function renderConnectionStatus(status: ConnectionStatus): string {
 function emptyBot(existingBots: DraftBot[], defaultMaskSensitiveData: boolean): DraftBot {
     const identity = nextBotIdentity(existingBots);
     const local = id('bot');
-    return {local_id: local, bot_id: identity.id, username: '', display_name: '', description: '', base_url: '', auth_mode: '', auth_token: '', model: '', mode: 'ocr', output_mode: 'markdown', ocr_prompt: '', temperature: 0, max_tokens: 2048, top_p: 1, repetition_penalty: 1, presence_penalty: 0, frequency_penalty: 0, extra_request_json: '', mask_sensitive_data: defaultMaskSensitiveData, vllm_base_url: '', vllm_api_key: '', vllm_model: '', vllm_prompt: '', vllm_scope: 'postprocess', allowed_teams: [], allowed_channels: [], allowed_users: []};
+    return {local_id: local, bot_id: identity.id, username: '', display_name: '', description: '', base_url: '', auth_mode: '', auth_token: '', model: '', mode: 'chat', output_mode: 'markdown', ocr_prompt: '', temperature: 0, max_tokens: 2048, top_p: 1, repetition_penalty: 1, presence_penalty: 0, frequency_penalty: 0, extra_request_json: '', mask_sensitive_data: defaultMaskSensitiveData, vllm_base_url: '', vllm_api_key: '', vllm_model: '', vllm_prompt: '', vllm_scope: 'postprocess', allowed_teams: [], allowed_channels: [], allowed_users: []};
 }
 
 function nextBotIdentity(existingBots: DraftBot[], start = 1): {id: string; username: string; display_name: string} {
@@ -794,7 +796,11 @@ export function selectionKey(bot: DraftBot): string {
 }
 
 function modeLabel(value: string): string {
-    return normalizeMode(value) === 'multimodal' ? 'multimodal' : 'ocr';
+    const mode = normalizeMode(value);
+    if (mode === 'chat') {
+        return 'chat';
+    }
+    return mode === 'multimodal' ? 'multimodal' : 'ocr';
 }
 
 function botScope(value: unknown): string {
@@ -806,7 +812,11 @@ function botScope(value: unknown): string {
 }
 
 function defaultAttachmentInstruction(mode: string): string {
-    if (normalizeMode(mode) === 'multimodal') {
+    const normalized = normalizeMode(mode);
+    if (normalized === 'chat') {
+        return '\uccab \uc694\uccad\uc774 \ud14d\uc2a4\ud2b8 \uc9c8\uc758\uc778\uc9c0, \ucca8\ubd80 \ubb38\uc11c \uc694\uc57d\uc778\uc9c0 \ud30c\uc545\ud55c \ub4a4 \ud575\uc2ec\uc744 \uac04\uacb0\ud558\uac8c \ub2f5\ud558\uc138\uc694.';
+    }
+    if (normalized === 'multimodal') {
         return '\ucca8\ubd80\ub41c \uc774\ubbf8\uc9c0\ub098 \ubb38\uc11c\uc758 \ubcf4\uc774\ub294 \ub0b4\uc6a9\ub9cc \uadfc\uac70\ub85c \ub2f5\ud558\uc138\uc694.';
     }
     return '\ucca8\ubd80\ub41c \ubb38\uc11c\uc758 \ud14d\uc2a4\ud2b8\ub97c \uc6d0\ubb38\uc5d0 \ucda9\uc2e4\ud558\uac8c \ucd94\ucd9c\ud558\uc138\uc694.';
@@ -856,6 +866,9 @@ function botAuth(value: unknown): string {
 
 function normalizeMode(value: unknown): string {
     const normalized = String(value || '').trim().toLowerCase();
+    if (normalized === 'chat' || normalized === 'text' || normalized === 'text-generation' || normalized === 'generation') {
+        return 'chat';
+    }
     if (normalized === 'multimodal' || normalized === 'vision' || normalized === 'vlm') {
         return 'multimodal';
     }
@@ -863,15 +876,15 @@ function normalizeMode(value: unknown): string {
 }
 
 function user(value: unknown): string {
-    return String(value || '').trim().toLowerCase().replace(/^@+/, '').replace(/[^a-z0-9-_]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+    return String(value || '').trim().toLowerCase().replace(/^@+/, '').replace(/[^a-z0-9._-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
 }
 
 export function draftUsername(value: unknown): string {
-    return String(value || '').toLowerCase().replace(/^@+/, '').replace(/[^a-z0-9-_]/g, '-').replace(/-+/g, '-');
+    return String(value || '').toLowerCase().replace(/^@+/, '').replace(/[^a-z0-9._-]/g, '-').replace(/-+/g, '-');
 }
 
 function idValue(value: unknown, fallback: string): string {
-    const normalized = String(value || '').trim().toLowerCase().replace(/[^a-z0-9-_]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+    const normalized = String(value || '').trim().toLowerCase().replace(/[^a-z0-9._-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
     return normalized || fallback;
 }
 

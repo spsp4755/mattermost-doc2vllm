@@ -7,8 +7,8 @@ import {buildConfig, draftUsername, loadConfig, normalizeConfig, pickBot, select
 jest.mock('manifest', () => ({
     __esModule: true,
     default: {
-        id: 'com.mattermost.doc2vllm-ocr-test',
-        version: '0.1.13',
+        id: 'com.mattermost.vllm-llm',
+        version: '0.1.0',
     },
 }), {virtual: true});
 
@@ -156,6 +156,17 @@ describe('loadConfig', () => {
         expect(draftUsername('qwen-')).toBe('qwen-');
     });
 
+    test('keeps dots while editing and saving the username', () => {
+        expect(draftUsername('qwen.test.ocr')).toBe('qwen.test.ocr');
+
+        const config = normalizeConfig(draftConfig);
+        config.bots[0].username = 'qwen.test.ocr';
+
+        const built = buildConfig(config);
+
+        expect(built.bots[0].username).toBe('qwen.test.ocr');
+    });
+
     test('normalizes trailing hyphens only when building the saved config', () => {
         const config = normalizeConfig(draftConfig);
         config.bots[0].username = 'qwen-';
@@ -191,5 +202,19 @@ describe('loadConfig', () => {
         const roundTripped = normalizeConfig(built);
 
         expect(pickBot(roundTripped.bots, selectionKey(config.bots[2]))).toBe(selectionKey(roundTripped.bots[2]));
+    });
+
+    test('preserves chat mode values in the saved config', () => {
+        const config = normalizeConfig({
+            ...draftConfig,
+            bots: [{
+                ...draftConfig.bots[0],
+                mode: 'text',
+            }],
+        });
+
+        const built = buildConfig(config);
+
+        expect(built.bots[0].mode).toBe('chat');
     });
 });

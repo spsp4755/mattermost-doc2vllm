@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	defaultDoc2VLLMModel     = "doc2vllm-ocr"
+	defaultDoc2VLLMModel     = "Qwen/Qwen2.5-7B-Instruct"
 	defaultDoc2VLLMMaxTokens = 1024
 	defaultDoc2VLLMTopP      = 1.0
 	defaultOutputMode        = "markdown"
@@ -159,6 +159,10 @@ func (b BotDefinition) effectiveMode() string {
 	return normalizeBotMode(b.Mode)
 }
 
+func (b BotDefinition) supportsVisionInputs() bool {
+	return b.effectiveMode() != "chat"
+}
+
 func (b BotDefinition) effectiveDoc2VLLMTemperature() float64 {
 	return normalizeDoc2VLLMTemperature(b.Temperature)
 }
@@ -282,6 +286,8 @@ func normalizeRepetitionPenalty(value float64) float64 {
 
 func normalizeBotMode(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "chat", "text", "text-generation", "generation":
+		return "chat"
 	case "multimodal", "vision", "vlm":
 		return "multimodal"
 	default:
@@ -373,6 +379,18 @@ func matchesAccessEntry(entries []string, values ...string) bool {
 		}
 	}
 	return false
+}
+
+func genericBotUsageExamples(bot BotDefinition) []string {
+	examples := []string{
+		fmt.Sprintf("- `@%s 오늘 회의 내용을 5줄로 정리해줘`", bot.Username),
+		fmt.Sprintf("- `@%s 이 문서를 요약하고 액션 아이템만 뽑아줘` + PDF/DOCX/XLSX/PPTX 첨부", bot.Username),
+	}
+	if bot.supportsVisionInputs() {
+		examples = append(examples, fmt.Sprintf("- `@%s 첨부 이미지의 핵심 내용을 설명해줘` + 이미지 첨부", bot.Username))
+	}
+	examples = append(examples, fmt.Sprintf("- DM `%s` 로 텍스트만 보내거나 파일을 같이 첨부해서 사용", bot.Username))
+	return examples
 }
 
 func botUsageExamples(bot BotDefinition) []string {

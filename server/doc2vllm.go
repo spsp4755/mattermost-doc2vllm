@@ -18,12 +18,15 @@ import (
 )
 
 const (
-	defaultDoc2VLLMOCRPrompt = "Extract the visible text from the attached document faithfully without inventing missing content."
+	defaultDoc2VLLMOCRPrompt  = "Extract the visible text from the attached document faithfully without inventing missing content."
+	defaultDoc2VLLMChatPrompt = "You are a helpful AI assistant. Follow the user's instructions carefully and answer in the same language when practical."
 )
 
 const defaultDoc2VLLMFollowupPrompt = "Please answer using the extracted document context."
 const defaultDoc2VLLMAttachmentUserPrompt = "Please process the attached document according to the system instructions."
 const defaultDoc2VLLMMultimodalPrompt = "Analyze the attached image or document and answer using only its visible contents."
+const defaultDoc2VLLMTextAttachmentPrompt = "Summarize the attached content and answer the user's request clearly."
+const defaultDoc2VLLMConnectionProbePrompt = "Reply with the exact text: connection ok"
 
 type doc2vllmServiceConfig struct {
 	BaseURL       string
@@ -388,30 +391,60 @@ func buildDoc2VLLMChatRequest(
 
 func buildDoc2VLLMSystemPrompt(bot BotDefinition, documentContext string, hasAttachment bool) string {
 	if hasAttachment {
-		assistantRole := "You are an OCR document assistant."
-		if bot.effectiveMode() == "multimodal" {
-			assistantRole = "You are a multimodal document assistant."
-		}
-		parts := []string{
-			assistantRole,
-		}
+		parts := []string{attachmentAssistantRole(bot)}
 		if instruction := strings.TrimSpace(bot.effectiveOCRInstruction()); instruction != "" {
 			parts = append(parts, instruction)
 		}
-		parts = append(parts, "Read the attached document carefully and answer in the same language as the user when possible.")
+		parts = append(parts, "Use the attached content as the primary source of truth and answer in the same language as the user when possible.")
 		return strings.TrimSpace(strings.Join(parts, "\n\n"))
 	}
 
-	parts := []string{
-		"You are a document question-answering assistant.",
-		"Use the extracted document context below as the source of truth for follow-up answers.",
-		"If the answer is not grounded in the extracted document context, say so clearly.",
-		"Answer only the current request. Do not repeat the full OCR transcript, the entire document, or the full question unless the user explicitly asks for it.",
-	}
 	if source := strings.TrimSpace(documentContext); source != "" {
+		parts := []string{
+			documentConversationSystemPrompt(bot),
+			"Use the extracted attachment context below as the source of truth for the current request.",
+			"If the answer is not grounded in the attachment context, say so clearly.",
+			"Answer only the current request. Do not repeat the full source unless the user explicitly asks for it.",
+		}
 		parts = append(parts, "[OCR document source]\n"+source)
+		return strings.TrimSpace(strings.Join(parts, "\n\n"))
 	}
-	return strings.TrimSpace(strings.Join(parts, "\n\n"))
+
+	return textConversationSystemPrompt(bot)
+}
+
+func attachmentAssistantRole(bot BotDefinition) string {
+	switch bot.effectiveMode() {
+	case "chat":
+		return "You are a helpful AI assistant."
+	case "multimodal":
+		return "You are a multimodal AI assistant."
+	default:
+		return "You are a document OCR assistant."
+	}
+}
+
+func documentConversationSystemPrompt(bot BotDefinition) string {
+	if bot.effectiveMode() == "chat" {
+		if prompt := strings.TrimSpace(bot.OCRPrompt); prompt != "" {
+			return prompt
+		}
+		return defaultDoc2VLLMChatPrompt
+	}
+	return "You are a document question-answering assistant."
+}
+
+func textConversationSystemPrompt(bot BotDefinition) string {
+	if bot.effectiveMode() == "chat" {
+		if prompt := strings.TrimSpace(bot.OCRPrompt); prompt != "" {
+			return prompt
+		}
+		return defaultDoc2VLLMChatPrompt
+	}
+	if bot.effectiveMode() == "multimodal" {
+		return "You are a multimodal AI assistant. Answer clearly and use the same language as the user when practical."
+	}
+	return defaultDoc2VLLMChatPrompt
 }
 
 func buildDoc2VLLMUserPrompt(userPrompt, effectiveUserPrompt string, hasAttachment bool) string {
@@ -880,7 +913,7 @@ func (p *Plugin) testDoc2VLLMConnection(ctx context.Context, cfg *runtimeConfigu
 		Model: model,
 		Messages: []doc2vllmMessage{{
 			Role:    "user",
-			Content: defaultDoc2VLLMOCRPrompt,
+			Content: defaultDoc2VLLMConnectionProbePrompt,
 		}},
 		Temperature: 0,
 		MaxTokens:   16,
@@ -908,19 +941,6 @@ func (p *Plugin) testDoc2VLLMConnection(ctx context.Context, cfg *runtimeConfigu
 	defer response.Body.Close()
 
 	bodyBytes, _ = io.ReadAll(io.LimitReader(response.Body, 32*1024))
-	if response.StatusCode == http.StatusBadRequest || response.StatusCode == http.StatusUnsupportedMediaType || response.StatusCode == http.StatusUnprocessableEntity {
-		return &doc2vllmConnectionStatus{
-			OK:         true,
-			URL:        serviceConfig.BaseURL,
-			StatusCode: response.StatusCode,
-			BotID:      strings.TrimSpace(testBot.ID),
-			BotName:    defaultIfEmpty(strings.TrimSpace(testBot.DisplayName), strings.TrimSpace(testBot.Username)),
-			Model:      model,
-			Mode:       testBot.effectiveMode(),
-			AuthMode:   serviceConfig.AuthMode,
-			Message:    "Connection to the endpoint succeeded. The probe request was rejected only because it did not include a real OCR attachment.",
-		}, nil
-	}
 	if response.StatusCode >= http.StatusBadRequest {
 		status := classifyDoc2VLLMHTTPError(serviceConfig.BaseURL, response.StatusCode, response.Header, bodyBytes).toConnectionStatus()
 		status.BotID = strings.TrimSpace(testBot.ID)

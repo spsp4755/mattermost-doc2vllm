@@ -130,8 +130,34 @@ func (p *Plugin) executeBotAndPost(ctx context.Context, request BotRunRequest) (
 		p.finalizeExecutionFailure(cfg, request, account, channel, progress, correlationID, prompt, failure, startedAt)
 		return nil, err
 	}
-	if len(attachments) == 0 && strings.TrimSpace(request.RootID) != "" {
-		return p.executeThreadConversation(ctx, cfg, request, *bot, account, channel, progress, startedAt, correlationID)
+	if len(attachments) == 0 {
+		if strings.TrimSpace(request.RootID) != "" {
+			state, stateErr := p.getThreadConversationState(request.RootID)
+			if stateErr != nil {
+				failure := describeExecutionFailure(stateErr, true, time.Since(startedAt))
+				if strings.TrimSpace(failure.StageLabel) == "" {
+					failure.StageLabel = "thread_state"
+				}
+				p.finalizeExecutionFailure(cfg, request, account, channel, progress, correlationID, prompt, failure, startedAt)
+				return nil, stateErr
+			}
+			if state != nil {
+				return p.executeThreadConversation(ctx, cfg, request, *bot, account, channel, progress, startedAt, correlationID)
+			}
+		}
+		if prompt == "" {
+			err := fmt.Errorf("enter a prompt or attach a file before asking @%s", bot.Username)
+			failure := executionFailureView{
+				HasFailure:  true,
+				StageLabel:  "input_validation",
+				Message:     err.Error(),
+				Hint:        "Send a text question, or attach image/PDF/DOCX/XLSX/PPTX files with an instruction.",
+				APIDuration: time.Since(startedAt),
+			}
+			p.finalizeExecutionFailure(cfg, request, account, channel, progress, correlationID, prompt, failure, startedAt)
+			return nil, err
+		}
+		return p.executeInitialTextConversation(ctx, cfg, request, *bot, account, channel, progress, startedAt, correlationID)
 	}
 	_ = p.updateProgressPost(progress, "문서 전처리", fmt.Sprintf("첨부 파일 %d개를 확인했고, 문서 전처리를 시작합니다.", len(attachments)), "", startedAt, true)
 	preparedInputs, processingFailures := p.prepareOCRInputs(ctx, cfg, attachments)
@@ -142,6 +168,18 @@ func (p *Plugin) executeBotAndPost(ctx context.Context, request BotRunRequest) (
 			StageLabel:  "입력 확인",
 			Message:     err.Error(),
 			Hint:        "이미지, PDF, DOCX, XLSX, PPTX 파일을 먼저 첨부한 뒤 다시 요청해 주세요.",
+			APIDuration: time.Since(startedAt),
+		}
+		p.finalizeExecutionFailure(cfg, request, account, channel, progress, correlationID, prompt, failure, startedAt)
+		return nil, err
+	}
+	if !bot.supportsVisionInputs() && preparedInputsContainVisionInputs(preparedInputs) {
+		err := fmt.Errorf("bot @%s is configured for text generation only and cannot analyze image-based attachments", bot.Username)
+		failure := executionFailureView{
+			HasFailure:  true,
+			StageLabel:  "attachment_validation",
+			Message:     err.Error(),
+			Hint:        "Use a multimodal bot for images or scanned PDFs, or upload text-based Office/PDF files for text-only bots.",
 			APIDuration: time.Since(startedAt),
 		}
 		p.finalizeExecutionFailure(cfg, request, account, channel, progress, correlationID, prompt, failure, startedAt)
@@ -245,7 +283,76 @@ func (p *Plugin) executeBotAndPost(ctx context.Context, request BotRunRequest) (
 	debugView := successDebugView{
 		Request: buildSuccessRequestDebugPayload(requestDebugs, ""),
 	}
-	if bot.shouldUseVLLMForPostProcess() {
+	if bot.effectiveMode() == "chat" {
+		chatPrompt := strings.TrimSpace(effectivePrompt)
+		if chatPrompt == "" {
+			chatPrompt = defaultDoc2VLLMTextAttachmentPrompt
+		}
+		effectivePrompt = chatPrompt
+
+		response := doc2vllmOCRResponse{}
+		requestDebug := doc2vllmRequestDebug{}
+		var invokeErr error
+		if shouldUseDoc2VLLMStreaming(cfg, *bot) {
+			streamDuration := time.Duration(0)
+			response, requestDebug, streamDuration, _, invokeErr = p.invokeDoc2VLLMConversationStream(
+				ctx,
+				serviceConfig,
+				*bot,
+				sourceDocumentContext,
+				nil,
+				chatPrompt,
+				correlationID,
+				func(content string) error {
+					return p.updateProgressPost(progress, "chat_response", "Generating an answer from the extracted attachment context.", content, startedAt, false)
+				},
+			)
+			apiDurationTotal += streamDuration
+			if invokeErr != nil {
+				p.API.LogWarn("Streaming attachment chat request failed; falling back to standard request", "correlation_id", correlationID, "bot_id", bot.ID, "error", invokeErr)
+			}
+		}
+		if invokeErr != nil || len(response.Choices) == 0 {
+			invokeStartedAt := time.Now()
+			response, requestDebug, _, _, invokeErr = p.invokeDoc2VLLMConversation(
+				ctx,
+				serviceConfig,
+				*bot,
+				sourceDocumentContext,
+				nil,
+				chatPrompt,
+				correlationID,
+			)
+			apiDurationTotal += time.Since(invokeStartedAt)
+		}
+		if invokeErr != nil {
+			failure := describeExecutionFailure(invokeErr, true, apiDurationTotal)
+			p.finalizeExecutionFailure(cfg, request, account, channel, progress, correlationID, chatPrompt, failure, startedAt)
+			return &BotRunResult{
+				CorrelationID: correlationID,
+				BotID:         account.Definition.ID,
+				BotUsername:   account.Definition.Username,
+				BotName:       account.Definition.DisplayName,
+				Model:         account.Definition.Model,
+				APIDurationMS: apiDurationTotal.Milliseconds(),
+				Status:        "failed",
+				ErrorMessage:  failure.Message,
+				ErrorCode:     failure.ErrorCode,
+				ErrorDetail:   failure.Detail,
+				ErrorHint:     failure.Hint,
+				RequestURL:    failure.RequestURL,
+				HTTPStatus:    failure.HTTPStatus,
+				Retryable:     failure.Retryable,
+			}, invokeErr
+		}
+		output = truncateString(strings.TrimSpace(extractDoc2VLLMResponseText(response)), cfg.MaxOutputLength)
+		debugView = successDebugView{
+			Request: buildSuccessRequestDebugPayload([]doc2vllmRequestDebug{requestDebug}, ""),
+		}
+		if shouldMaskSensitive {
+			output = truncateString(maskSensitiveContent(output), cfg.MaxOutputLength)
+		}
+	} else if bot.shouldUseVLLMForPostProcess() {
 		vllmConfig, vllmErr := cfg.serviceConfigForVLLMBot(*bot)
 		if vllmErr != nil {
 			output = buildVLLMFallbackOutput(documentContext, "vLLM 후처리 설정을 확인하지 못해 Doc2VLLM OCR 결과를 대신 표시합니다.")
@@ -305,7 +412,7 @@ func (p *Plugin) executeBotAndPost(ctx context.Context, request BotRunRequest) (
 			DocumentContext: sourceDocumentContext,
 			Turns: []conversationTurn{
 				{Role: "user", Content: effectivePrompt},
-				{Role: "assistant", Content: buildConversationAssistantMemory(output, true)},
+				{Role: "assistant", Content: buildConversationAssistantMemory(output, bot.effectiveMode() != "chat")},
 			},
 		}
 		if saveErr := p.saveThreadConversationState(state); saveErr != nil {
@@ -335,6 +442,131 @@ func (p *Plugin) executeBotAndPost(ctx context.Context, request BotRunRequest) (
 	}, nil
 }
 
+func (p *Plugin) executeInitialTextConversation(
+	ctx context.Context,
+	cfg *runtimeConfiguration,
+	request BotRunRequest,
+	bot BotDefinition,
+	account botAccount,
+	channel *model.Channel,
+	progress *botProgressPost,
+	startedAt time.Time,
+	correlationID string,
+) (*BotRunResult, error) {
+	serviceConfig, err := cfg.serviceConfigForBot(bot)
+	if err != nil {
+		failure := describeExecutionFailure(err, true, time.Since(startedAt))
+		if strings.TrimSpace(failure.StageLabel) == "" {
+			failure.StageLabel = "service_config"
+		}
+		p.finalizeExecutionFailure(cfg, request, account, channel, progress, correlationID, request.Prompt, failure, startedAt)
+		return nil, err
+	}
+
+	effectivePrompt := strings.TrimSpace(request.Prompt)
+	apiDuration := time.Duration(0)
+	response := doc2vllmOCRResponse{}
+	requestDebug := doc2vllmRequestDebug{}
+	var invokeErr error
+	if shouldUseDoc2VLLMStreaming(cfg, bot) {
+		response, requestDebug, apiDuration, _, invokeErr = p.invokeDoc2VLLMConversationStream(
+			ctx,
+			serviceConfig,
+			bot,
+			"",
+			nil,
+			effectivePrompt,
+			correlationID,
+			func(content string) error {
+				return p.updateProgressPost(progress, "text_generation", "Generating a response.", content, startedAt, false)
+			},
+		)
+		if invokeErr != nil {
+			p.API.LogWarn("Streaming text conversation failed; falling back to standard request", "correlation_id", correlationID, "bot_id", bot.ID, "error", invokeErr)
+		}
+	}
+	if invokeErr != nil || len(response.Choices) == 0 {
+		response, requestDebug, apiDuration, _, invokeErr = p.invokeDoc2VLLMConversation(
+			ctx,
+			serviceConfig,
+			bot,
+			"",
+			nil,
+			effectivePrompt,
+			correlationID,
+		)
+	}
+	if effectivePrompt == "" {
+		effectivePrompt = strings.TrimSpace(requestDebug.EffectiveUserPrompt)
+	}
+	if invokeErr != nil {
+		failure := describeExecutionFailure(invokeErr, true, apiDuration)
+		p.finalizeExecutionFailure(cfg, request, account, channel, progress, correlationID, effectivePrompt, failure, startedAt)
+		return &BotRunResult{
+			CorrelationID: correlationID,
+			BotID:         account.Definition.ID,
+			BotUsername:   account.Definition.Username,
+			BotName:       account.Definition.DisplayName,
+			Model:         account.Definition.Model,
+			APIDurationMS: apiDuration.Milliseconds(),
+			Status:        "failed",
+			ErrorMessage:  failure.Message,
+			ErrorCode:     failure.ErrorCode,
+			ErrorDetail:   failure.Detail,
+			ErrorHint:     failure.Hint,
+			RequestURL:    failure.RequestURL,
+			HTTPStatus:    failure.HTTPStatus,
+			Retryable:     failure.Retryable,
+		}, invokeErr
+	}
+
+	output := truncateString(strings.TrimSpace(extractDoc2VLLMResponseText(response)), cfg.MaxOutputLength)
+	if bot.shouldMaskSensitiveData(cfg.MaskSensitiveData) {
+		output = truncateString(maskSensitiveContent(output), cfg.MaxOutputLength)
+	}
+
+	post, err := p.postSuccess(channel, request.RootID, account, progressPost(progress), correlationID, output, successDebugView{
+		Request: buildSuccessRequestDebugPayload([]doc2vllmRequestDebug{requestDebug}, ""),
+	}, apiDuration)
+	if err != nil {
+		record := newExecutionRecord(request, account.Definition, correlationID, "failed", effectivePrompt, err.Error(), "", true, startedAt, time.Now())
+		p.appendExecutionHistory(request.UserID, record)
+		return nil, err
+	}
+
+	if request.RootID != "" {
+		state := threadConversationState{
+			BotID:           bot.ID,
+			ChannelID:       request.ChannelID,
+			RootID:          request.RootID,
+			DocumentContext: "",
+			Turns: []conversationTurn{
+				{Role: "user", Content: effectivePrompt},
+				{Role: "assistant", Content: buildConversationAssistantMemory(output, false)},
+			},
+		}
+		if saveErr := p.saveThreadConversationState(state); saveErr != nil {
+			p.API.LogWarn("Failed to persist text conversation state", "error", saveErr, "root_id", request.RootID, "correlation_id", correlationID)
+		}
+	}
+
+	record := newExecutionRecord(request, account.Definition, correlationID, "completed", effectivePrompt, "", "", false, startedAt, time.Now())
+	p.appendExecutionHistory(request.UserID, record)
+	p.logUsage(cfg, correlationID, request, account.Definition, "completed", "")
+
+	return &BotRunResult{
+		CorrelationID: correlationID,
+		BotID:         account.Definition.ID,
+		BotUsername:   account.Definition.Username,
+		BotName:       account.Definition.DisplayName,
+		Model:         account.Definition.Model,
+		APIDurationMS: apiDuration.Milliseconds(),
+		PostID:        post.Id,
+		Status:        "completed",
+		Output:        output,
+	}, nil
+}
+
 func (p *Plugin) executeThreadConversation(
 	ctx context.Context,
 	cfg *runtimeConfiguration,
@@ -355,8 +587,8 @@ func (p *Plugin) executeThreadConversation(
 		p.finalizeExecutionFailure(cfg, request, account, channel, progress, correlationID, request.Prompt, failure, startedAt)
 		return nil, err
 	}
-	if state == nil || strings.TrimSpace(state.DocumentContext) == "" {
-		err := fmt.Errorf("attach at least one image, PDF, DOCX, XLSX, or PPTX file before asking @%s", bot.Username)
+	if state == nil {
+		err := fmt.Errorf("start a conversation with @%s before sending a follow-up message in this thread", bot.Username)
 		p.finalizeExecutionFailure(cfg, request, account, channel, progress, correlationID, request.Prompt, executionFailureView{
 			HasFailure:  true,
 			StageLabel:  "질문 확인",
@@ -384,7 +616,8 @@ func (p *Plugin) executeThreadConversation(
 	debugView := successDebugView{}
 	_ = p.updateProgressPost(progress, "질문 확인", "이전 OCR 결과를 바탕으로 후속 질문을 처리하고 있습니다.", "", startedAt, true)
 
-	if bot.shouldUseVLLMForFollowUps() {
+	hasDocumentContext := strings.TrimSpace(state.DocumentContext) != ""
+	if hasDocumentContext && bot.shouldUseVLLMForFollowUps() {
 		vllmConfig, configErr := cfg.serviceConfigForVLLMBot(bot)
 		if configErr != nil {
 			failure := describeExecutionFailure(configErr, true, time.Since(startedAt))
@@ -605,6 +838,15 @@ func (p *Plugin) finalizeExecutionFailure(
 	if _, postErr := p.postFailure(channel, request.RootID, account, progressPost(progress), correlationID, failure); postErr != nil {
 		p.API.LogError("Failed to post Doc2VLLM failure response", "error", postErr, "correlation_id", correlationID)
 	}
+}
+
+func preparedInputsContainVisionInputs(preparedInputs []preparedOCRInput) bool {
+	for _, preparedInput := range preparedInputs {
+		if preparedInput.DirectResult == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func shouldStreamInitialOCR(cfg *runtimeConfiguration, bot BotDefinition, preparedInputs []preparedOCRInput, processingFailures []documentProcessingFailure) bool {

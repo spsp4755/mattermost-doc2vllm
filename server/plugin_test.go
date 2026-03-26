@@ -72,6 +72,13 @@ func TestParseBotDefinitionsSupportsVLLMScope(t *testing.T) {
 	require.True(t, bots[0].shouldUseVLLMForFollowUps())
 }
 
+func TestNormalizeBotModeSupportsChatAliases(t *testing.T) {
+	require.Equal(t, "chat", normalizeBotMode("chat"))
+	require.Equal(t, "chat", normalizeBotMode("text"))
+	require.Equal(t, "chat", normalizeBotMode("text-generation"))
+	require.Equal(t, "multimodal", normalizeBotMode("vision"))
+}
+
 func TestConfigurationGetStoredPluginConfigDefaultsWhenEmpty(t *testing.T) {
 	cfg := &configuration{}
 	stored, source, err := cfg.getStoredPluginConfig()
@@ -343,7 +350,7 @@ func TestBuildDoc2VLLMChatRequest(t *testing.T) {
 	require.Equal(t, "system", requestPayload.Messages[0].Role)
 	systemContent, ok := requestPayload.Messages[0].Content.(string)
 	require.True(t, ok)
-	require.Contains(t, systemContent, "OCR document assistant")
+	require.Contains(t, systemContent, "document OCR assistant")
 	userContent, ok := requestPayload.Messages[1].Content.([]doc2vllmContentPart)
 	require.True(t, ok)
 	require.Len(t, userContent, 2)
@@ -394,6 +401,57 @@ func TestBuildDoc2VLLMChatRequestIncludesDocumentContextForConversation(t *testi
 	require.Contains(t, userContent, "What is the invoice number?")
 }
 
+func TestBuildDoc2VLLMChatRequestUsesGenericChatPromptForTextMode(t *testing.T) {
+	bot, err := (BotDefinition{
+		Username: "chat-bot",
+		Model:    "Qwen/Qwen2.5-7B-Instruct",
+		Mode:     "chat",
+	}).normalize()
+	require.NoError(t, err)
+
+	requestPayload, requestDebug, _, err := buildDoc2VLLMChatRequest(
+		doc2vllmServiceConfig{BaseURL: "http://localhost:8000/v1/chat/completions", AuthMode: "bearer"},
+		bot,
+		nil,
+		"Summarize this thread.",
+		"",
+		nil,
+		"corr-chat-1",
+	)
+	require.NoError(t, err)
+	require.Len(t, requestPayload.Messages, 2)
+	require.Equal(t, "system", requestPayload.Messages[0].Role)
+	systemContent, ok := requestPayload.Messages[0].Content.(string)
+	require.True(t, ok)
+	require.Contains(t, systemContent, "helpful AI assistant")
+	require.Equal(t, defaultDoc2VLLMChatPrompt, requestDebug.SystemPrompt)
+}
+
+func TestBuildDoc2VLLMChatRequestUsesConfiguredPromptForTextMode(t *testing.T) {
+	bot, err := (BotDefinition{
+		Username:  "minimax-chat",
+		Model:     "MiniMax-M1",
+		Mode:      "chat",
+		OCRPrompt: "Answer as a concise project copilot.",
+	}).normalize()
+	require.NoError(t, err)
+
+	requestPayload, requestDebug, _, err := buildDoc2VLLMChatRequest(
+		doc2vllmServiceConfig{BaseURL: "http://localhost:8000/v1/chat/completions", AuthMode: "bearer"},
+		bot,
+		nil,
+		"What changed in the release?",
+		"",
+		nil,
+		"corr-chat-2",
+	)
+	require.NoError(t, err)
+	systemContent, ok := requestPayload.Messages[0].Content.(string)
+	require.True(t, ok)
+	require.Equal(t, "Answer as a concise project copilot.", systemContent)
+	require.Equal(t, "Answer as a concise project copilot.", requestDebug.SystemPrompt)
+}
+
 func TestBuildDoc2VLLMImageDataURLRejectsNonImages(t *testing.T) {
 	_, err := buildDoc2VLLMImageDataURL(botAttachment{Name: "sample.pdf", MIMEType: "application/pdf", Content: []byte("pdf")})
 	require.Error(t, err)
@@ -413,6 +471,17 @@ func TestPrepareOCRInputsKeepsImages(t *testing.T) {
 	require.Empty(t, failures)
 	require.Len(t, prepared, 1)
 	require.Equal(t, attachments[0].Name, prepared[0].Attachment.Name)
+}
+
+func TestPreparedInputsContainVisionInputs(t *testing.T) {
+	require.True(t, preparedInputsContainVisionInputs([]preparedOCRInput{{
+		Attachment: botAttachment{Name: "scan.png"},
+	}}))
+	require.False(t, preparedInputsContainVisionInputs([]preparedOCRInput{{
+		DirectResult: &doc2vllmDocumentResult{
+			Attachment: botAttachment{Name: "report.docx"},
+		},
+	}}))
 }
 
 func TestPrepareOCRInputsUsesSearchablePDFTextWhenAvailable(t *testing.T) {
@@ -807,8 +876,8 @@ func TestTestDoc2VLLMConnectionUsesSelectedBotOverrides(t *testing.T) {
 		authHeader = r.Header.Get("x-api-key")
 		bodyBytes, _ = io.ReadAll(r.Body)
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(`{"error":{"message":"missing image input"}}`))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"connection ok"}}]}`))
 	}))
 	defer server.Close()
 

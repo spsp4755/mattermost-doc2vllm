@@ -145,8 +145,8 @@ func (p *Plugin) handlePostedMessage(post *model.Post) error {
 		return p.postInstruction(channel, responseRootID(post), account, fmt.Sprintf("`@%s` is not available in this conversation.", bot.Username))
 	}
 
-	if len(post.FileIds) == 0 && post.RootId == "" {
-		return p.postInstruction(channel, responseRootID(post), account, buildBotPromptMessage(*bot))
+	if len(post.FileIds) == 0 && post.RootId == "" && strings.TrimSpace(prompt) == "" {
+		return p.postInstruction(channel, responseRootID(post), account, genericBotPromptMessage(*bot))
 	}
 
 	request := BotRunRequest{
@@ -220,6 +220,22 @@ func (p *Plugin) getTeamForChannel(channel *model.Channel) *model.Team {
 		return nil
 	}
 	return team
+}
+
+func genericBotPromptMessage(bot BotDefinition) string {
+	lines := []string{
+		fmt.Sprintf("`@%s` bot is using model `%s`.", bot.Username, bot.Model),
+		"",
+		"Send a text prompt directly, or attach image/PDF/DOCX/XLSX/PPTX files with an instruction.",
+		"Searchable PDFs and Office files are processed locally first, and vision-capable bots can analyze image inputs directly.",
+		"",
+		"Examples:",
+	}
+	lines = append(lines, genericBotUsageExamples(bot)...)
+	if bot.Description != "" {
+		lines = append(lines, "", bot.Description)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func buildBotPromptMessage(bot BotDefinition) string {
